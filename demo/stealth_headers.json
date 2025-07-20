@@ -1,0 +1,7 @@
+{
+  "Referer": "https://google.com",
+  "X-Forwarded-For": "203.0.113.195",
+  "X-Real-IP": "203.0.113.195",
+  "Cache-Control": "no-cache",
+  "Pragma": "no-cache"
+}

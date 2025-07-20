@@ -1,0 +1,7 @@
+{
+  "username": "demo_user",
+  "password": "demo_password",
+  "email": "demo@example.com",
+  "action": "login",
+  "remember_me": "true"
+}
