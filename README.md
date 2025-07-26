@@ -42,7 +42,7 @@ go build -o bin/scraper.exe ./cmd/scraper
 
 ## Examples
 
-See `CLI_EXAMPLES.md` for comprehensive usage examples.
+See [CLI Examples](./CLI_EXAMPLES.md) for comprehensive usage examples.
 
 ## Dependencies
 
