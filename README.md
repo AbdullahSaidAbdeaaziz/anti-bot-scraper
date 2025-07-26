@@ -479,20 +479,6 @@ go version  # Should be 1.21 or higher
 go build -o bin/scraper.exe ./cmd/scraper
 ```
 
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-### 🐛 **Bug Reports**
-- Use GitHub Issues with detailed reproduction steps
-- Include system information and scraper version
-- Provide sample URLs and configuration flags used
-
-### 💡 **Feature Requests**
-- Check existing issues and TODO.md for planned features
-- Describe use case and expected behavior
-- Consider implementing and submitting a pull request
-
 ## 📄 License
 
 MIT License - see [LICENSE](LICENSE) file for details.
