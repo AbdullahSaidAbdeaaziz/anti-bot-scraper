@@ -127,3 +127,6 @@ coverage.txt
 # Go module proxy cache
 GOPROXY=
 GOSUMDB=
+
+
+*.exe
