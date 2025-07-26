@@ -125,6 +125,8 @@ func (cs *CaptchaSolver) SolveImageCaptcha(ctx context.Context, imageData []byte
 		return cs.solveDeathByCaptchaImage(ctx, task)
 	case AntiCaptchaService:
 		return cs.solveAntiCaptchaImage(ctx, task)
+	case CapMonsterService:
+		return cs.solveCapMonsterImage(ctx, task)
 	default:
 		return nil, fmt.Errorf("unsupported service for image CAPTCHA: %s", cs.config.Service)
 	}
@@ -148,6 +150,8 @@ func (cs *CaptchaSolver) SolveRecaptchaV2(ctx context.Context, siteKey, pageURL 
 		return cs.solveDeathByCaptchaRecaptcha(ctx, task)
 	case AntiCaptchaService:
 		return cs.solveAntiCaptchaRecaptcha(ctx, task)
+	case CapMonsterService:
+		return cs.solveCapMonsterRecaptcha(ctx, task)
 	default:
 		return nil, fmt.Errorf("unsupported service for reCAPTCHA v2: %s", cs.config.Service)
 	}
@@ -175,6 +179,8 @@ func (cs *CaptchaSolver) SolveRecaptchaV3(ctx context.Context, siteKey, pageURL,
 		return cs.solve2CaptchaRecaptchaV3(ctx, task)
 	case AntiCaptchaService:
 		return cs.solveAntiCaptchaRecaptchaV3(ctx, task)
+	case CapMonsterService:
+		return cs.solveCapMonsterRecaptchaV3(ctx, task)
 	default:
 		return nil, fmt.Errorf("unsupported service for reCAPTCHA v3: %s", cs.config.Service)
 	}
@@ -196,6 +202,8 @@ func (cs *CaptchaSolver) SolveHCaptcha(ctx context.Context, siteKey, pageURL str
 		return cs.solve2CaptchaHCaptcha(ctx, task)
 	case AntiCaptchaService:
 		return cs.solveAntiCaptchaHCaptcha(ctx, task)
+	case CapMonsterService:
+		return cs.solveCapMonsterHCaptcha(ctx, task)
 	default:
 		return nil, fmt.Errorf("unsupported service for hCaptcha: %s", cs.config.Service)
 	}
@@ -210,6 +218,8 @@ func (cs *CaptchaSolver) GetBalance(ctx context.Context) (float64, error) {
 		return cs.getDeathByCaptchaBalance(ctx)
 	case AntiCaptchaService:
 		return cs.getAntiCaptchaBalance(ctx)
+	case CapMonsterService:
+		return cs.getCapMonsterBalance(ctx)
 	default:
 		return 0, fmt.Errorf("unsupported service: %s", cs.config.Service)
 	}
@@ -473,37 +483,834 @@ func (cs *CaptchaSolver) get2CaptchaBalance(ctx context.Context) (float64, error
 
 // DeathByCaptcha implementations (simplified for brevity)
 func (cs *CaptchaSolver) solveDeathByCaptchaImage(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
-	// Similar implementation for DeathByCaptcha
-	return nil, fmt.Errorf("DeathByCaptcha image solving not implemented yet")
+	// DeathByCaptcha image submission
+	payload := map[string]interface{}{
+		"username":     cs.config.APIKey, // DeathByCaptcha uses username as API key
+		"password":     cs.config.APIKey, // Can use same key for both
+		"captchafile":  task.ImageData,
+		"type":         "0", // Image type
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal DeathByCaptcha request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[DeathByCaptchaService]+"/api/captcha", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create DeathByCaptcha request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cs.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("DeathByCaptcha request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read DeathByCaptcha response: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse DeathByCaptcha response: %w", err)
+	}
+
+	if status, ok := result["status"].(float64); !ok || status != 0 {
+		return nil, fmt.Errorf("DeathByCaptcha submission failed: %s", string(body))
+	}
+
+	if captchaID, ok := result["captcha"].(float64); ok {
+		task.ID = fmt.Sprintf("%.0f", captchaID)
+		task.Status = "pending"
+		
+		// Poll for solution
+		return cs.pollDeathByCaptchaResult(ctx, task)
+	}
+
+	return nil, fmt.Errorf("invalid DeathByCaptcha response: %s", string(body))
 }
 
 func (cs *CaptchaSolver) solveDeathByCaptchaRecaptcha(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
-	return nil, fmt.Errorf("DeathByCaptcha reCAPTCHA solving not implemented yet")
+	// DeathByCaptcha reCAPTCHA submission
+	payload := map[string]interface{}{
+		"username":   cs.config.APIKey,
+		"password":   cs.config.APIKey,
+		"type":       "4", // reCAPTCHA type
+		"token_params": map[string]string{
+			"googlekey": task.SiteKey,
+			"pageurl":   task.PageURL,
+		},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal DeathByCaptcha reCAPTCHA request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[DeathByCaptchaService]+"/api/captcha", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create DeathByCaptcha reCAPTCHA request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cs.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("DeathByCaptcha reCAPTCHA request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read DeathByCaptcha reCAPTCHA response: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse DeathByCaptcha reCAPTCHA response: %w", err)
+	}
+
+	if status, ok := result["status"].(float64); !ok || status != 0 {
+		return nil, fmt.Errorf("DeathByCaptcha reCAPTCHA submission failed: %s", string(body))
+	}
+
+	if captchaID, ok := result["captcha"].(float64); ok {
+		task.ID = fmt.Sprintf("%.0f", captchaID)
+		task.Status = "pending"
+		
+		// Poll for solution
+		return cs.pollDeathByCaptchaResult(ctx, task)
+	}
+
+	return nil, fmt.Errorf("invalid DeathByCaptcha reCAPTCHA response: %s", string(body))
+}
+
+func (cs *CaptchaSolver) pollDeathByCaptchaResult(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
+	timeout := time.After(cs.config.Timeout)
+	ticker := time.NewTicker(cs.config.PollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timeout:
+			return nil, fmt.Errorf("DeathByCaptcha solving timed out after %v", cs.config.Timeout)
+		case <-ticker.C:
+			// Check result
+			req, err := http.NewRequestWithContext(ctx, "GET", 
+				fmt.Sprintf("%s/api/captcha/%s", cs.apiURLs[DeathByCaptchaService], task.ID), nil)
+			if err != nil {
+				continue
+			}
+
+			resp, err := cs.httpClient.Do(req)
+			if err != nil {
+				continue
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				continue
+			}
+
+			var result map[string]interface{}
+			if err := json.Unmarshal(body, &result); err != nil {
+				continue
+			}
+
+			if status, ok := result["status"].(float64); ok {
+				if status == 0 && result["text"] != nil {
+					// Solved
+					task.Solution = result["text"].(string)
+					task.Status = "solved"
+					now := time.Now()
+					task.SolvedAt = &now
+					return task, nil
+				} else if status == 255 {
+					// Failed
+					task.Status = "failed"
+					return nil, fmt.Errorf("DeathByCaptcha solving failed: captcha marked as unsolvable")
+				}
+				// Still processing, continue polling
+			}
+		}
+	}
 }
 
 func (cs *CaptchaSolver) getDeathByCaptchaBalance(ctx context.Context) (float64, error) {
-	return 0, fmt.Errorf("DeathByCaptcha balance check not implemented yet")
+	payload := map[string]string{
+		"username": cs.config.APIKey,
+		"password": cs.config.APIKey,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal DeathByCaptcha balance request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[DeathByCaptchaService]+"/api/user", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create DeathByCaptcha balance request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cs.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("DeathByCaptcha balance request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read DeathByCaptcha balance response: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, fmt.Errorf("failed to parse DeathByCaptcha balance response: %w", err)
+	}
+
+	if balance, ok := result["balance"].(float64); ok {
+		return balance, nil
+	}
+
+	return 0, fmt.Errorf("invalid DeathByCaptcha balance response: %s", string(body))
 }
 
 // Anti-Captcha implementations (simplified for brevity)
 func (cs *CaptchaSolver) solveAntiCaptchaImage(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
-	return nil, fmt.Errorf("Anti-Captcha image solving not implemented yet")
+	// Anti-Captcha task creation
+	taskData := map[string]interface{}{
+		"type": "ImageToTextTask",
+		"body": task.ImageData, // Base64 encoded
+	}
+
+	if task.Extra != nil {
+		if numeric, ok := task.Extra["numeric"].(bool); ok && numeric {
+			taskData["numeric"] = 1
+		}
+		if minLength, ok := task.Extra["min_length"].(int); ok {
+			taskData["minLength"] = minLength
+		}
+		if maxLength, ok := task.Extra["max_length"].(int); ok {
+			taskData["maxLength"] = maxLength
+		}
+	}
+
+	payload := map[string]interface{}{
+		"clientKey": cs.config.APIKey,
+		"task":      taskData,
+	}
+
+	if cs.config.SoftID != "" {
+		payload["softId"] = cs.config.SoftID
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Anti-Captcha request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[AntiCaptchaService]+"/createTask", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Anti-Captcha request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cs.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Anti-Captcha request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Anti-Captcha response: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse Anti-Captcha response: %w", err)
+	}
+
+	if errorID, ok := result["errorId"].(float64); !ok || errorID != 0 {
+		errorCode := "unknown"
+		if code, exists := result["errorCode"].(string); exists {
+			errorCode = code
+		}
+		return nil, fmt.Errorf("Anti-Captcha submission failed: %s", errorCode)
+	}
+
+	if taskID, ok := result["taskId"].(float64); ok {
+		task.ID = fmt.Sprintf("%.0f", taskID)
+		task.Status = "pending"
+		
+		// Poll for solution
+		return cs.pollAntiCaptchaResult(ctx, task)
+	}
+
+	return nil, fmt.Errorf("invalid Anti-Captcha response: %s", string(body))
 }
 
 func (cs *CaptchaSolver) solveAntiCaptchaRecaptcha(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
-	return nil, fmt.Errorf("Anti-Captcha reCAPTCHA solving not implemented yet")
+	// Anti-Captcha reCAPTCHA task creation
+	taskData := map[string]interface{}{
+		"type":       "NoCaptchaTaskProxyless",
+		"websiteURL": task.PageURL,
+		"websiteKey": task.SiteKey,
+	}
+
+	if task.Extra != nil {
+		if userAgent, ok := task.Extra["user_agent"].(string); ok {
+			taskData["userAgent"] = userAgent
+		}
+		if cookies, ok := task.Extra["cookies"].(string); ok {
+			taskData["cookies"] = cookies
+		}
+	}
+
+	payload := map[string]interface{}{
+		"clientKey": cs.config.APIKey,
+		"task":      taskData,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Anti-Captcha reCAPTCHA request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[AntiCaptchaService]+"/createTask", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Anti-Captcha reCAPTCHA request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cs.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Anti-Captcha reCAPTCHA request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Anti-Captcha reCAPTCHA response: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse Anti-Captcha reCAPTCHA response: %w", err)
+	}
+
+	if errorID, ok := result["errorId"].(float64); !ok || errorID != 0 {
+		errorCode := "unknown"
+		if code, exists := result["errorCode"].(string); exists {
+			errorCode = code
+		}
+		return nil, fmt.Errorf("Anti-Captcha reCAPTCHA submission failed: %s", errorCode)
+	}
+
+	if taskID, ok := result["taskId"].(float64); ok {
+		task.ID = fmt.Sprintf("%.0f", taskID)
+		task.Status = "pending"
+		
+		return cs.pollAntiCaptchaResult(ctx, task)
+	}
+
+	return nil, fmt.Errorf("invalid Anti-Captcha reCAPTCHA response: %s", string(body))
 }
 
 func (cs *CaptchaSolver) solveAntiCaptchaRecaptchaV3(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
-	return nil, fmt.Errorf("Anti-Captcha reCAPTCHA v3 solving not implemented yet")
+	// Anti-Captcha reCAPTCHA v3 task creation
+	taskData := map[string]interface{}{
+		"type":       "RecaptchaV3TaskProxyless",
+		"websiteURL": task.PageURL,
+		"websiteKey": task.SiteKey,
+		"minScore":   cs.config.MinScore,
+	}
+
+	if task.Extra != nil {
+		if action, ok := task.Extra["action"].(string); ok {
+			taskData["pageAction"] = action
+		}
+	}
+
+	payload := map[string]interface{}{
+		"clientKey": cs.config.APIKey,
+		"task":      taskData,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Anti-Captcha reCAPTCHA v3 request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[AntiCaptchaService]+"/createTask", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Anti-Captcha reCAPTCHA v3 request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cs.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Anti-Captcha reCAPTCHA v3 request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Anti-Captcha reCAPTCHA v3 response: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse Anti-Captcha reCAPTCHA v3 response: %w", err)
+	}
+
+	if errorID, ok := result["errorId"].(float64); !ok || errorID != 0 {
+		errorCode := "unknown"
+		if code, exists := result["errorCode"].(string); exists {
+			errorCode = code
+		}
+		return nil, fmt.Errorf("Anti-Captcha reCAPTCHA v3 submission failed: %s", errorCode)
+	}
+
+	if taskID, ok := result["taskId"].(float64); ok {
+		task.ID = fmt.Sprintf("%.0f", taskID)
+		task.Status = "pending"
+		
+		return cs.pollAntiCaptchaResult(ctx, task)
+	}
+
+	return nil, fmt.Errorf("invalid Anti-Captcha reCAPTCHA v3 response: %s", string(body))
 }
 
 func (cs *CaptchaSolver) solveAntiCaptchaHCaptcha(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
-	return nil, fmt.Errorf("Anti-Captcha hCaptcha solving not implemented yet")
+	// Anti-Captcha hCaptcha task creation
+	taskData := map[string]interface{}{
+		"type":       "HCaptchaTaskProxyless",
+		"websiteURL": task.PageURL,
+		"websiteKey": task.SiteKey,
+	}
+
+	if task.Extra != nil {
+		if userAgent, ok := task.Extra["user_agent"].(string); ok {
+			taskData["userAgent"] = userAgent
+		}
+	}
+
+	payload := map[string]interface{}{
+		"clientKey": cs.config.APIKey,
+		"task":      taskData,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Anti-Captcha hCaptcha request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[AntiCaptchaService]+"/createTask", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Anti-Captcha hCaptcha request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cs.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Anti-Captcha hCaptcha request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Anti-Captcha hCaptcha response: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse Anti-Captcha hCaptcha response: %w", err)
+	}
+
+	if errorID, ok := result["errorId"].(float64); !ok || errorID != 0 {
+		errorCode := "unknown"
+		if code, exists := result["errorCode"].(string); exists {
+			errorCode = code
+		}
+		return nil, fmt.Errorf("Anti-Captcha hCaptcha submission failed: %s", errorCode)
+	}
+
+	if taskID, ok := result["taskId"].(float64); ok {
+		task.ID = fmt.Sprintf("%.0f", taskID)
+		task.Status = "pending"
+		
+		return cs.pollAntiCaptchaResult(ctx, task)
+	}
+
+	return nil, fmt.Errorf("invalid Anti-Captcha hCaptcha response: %s", string(body))
+}
+
+func (cs *CaptchaSolver) pollAntiCaptchaResult(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
+	timeout := time.After(cs.config.Timeout)
+	ticker := time.NewTicker(cs.config.PollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timeout:
+			return nil, fmt.Errorf("Anti-Captcha solving timed out after %v", cs.config.Timeout)
+		case <-ticker.C:
+			// Check result
+			payload := map[string]interface{}{
+				"clientKey": cs.config.APIKey,
+				"taskId":    task.ID,
+			}
+
+			jsonData, err := json.Marshal(payload)
+			if err != nil {
+				continue
+			}
+
+			req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[AntiCaptchaService]+"/getTaskResult", bytes.NewBuffer(jsonData))
+			if err != nil {
+				continue
+			}
+
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := cs.httpClient.Do(req)
+			if err != nil {
+				continue
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				continue
+			}
+
+			var result map[string]interface{}
+			if err := json.Unmarshal(body, &result); err != nil {
+				continue
+			}
+
+			if errorID, ok := result["errorId"].(float64); ok && errorID == 0 {
+				if status, exists := result["status"].(string); exists {
+					if status == "ready" {
+						// Solved
+						if solution, ok := result["solution"].(map[string]interface{}); ok {
+							if token, exists := solution["gRecaptchaResponse"].(string); exists {
+								task.Solution = token
+							} else if text, exists := solution["text"].(string); exists {
+								task.Solution = text
+							}
+							task.Status = "solved"
+							now := time.Now()
+							task.SolvedAt = &now
+							return task, nil
+						}
+					} else if status == "processing" {
+						// Still processing, continue polling
+						continue
+					}
+				}
+			} else {
+				// Error occurred
+				task.Status = "failed"
+				return nil, fmt.Errorf("Anti-Captcha solving failed")
+			}
+		}
+	}
 }
 
 func (cs *CaptchaSolver) getAntiCaptchaBalance(ctx context.Context) (float64, error) {
-	return 0, fmt.Errorf("Anti-Captcha balance check not implemented yet")
+	payload := map[string]interface{}{
+		"clientKey": cs.config.APIKey,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal Anti-Captcha balance request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[AntiCaptchaService]+"/getBalance", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create Anti-Captcha balance request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cs.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("Anti-Captcha balance request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read Anti-Captcha balance response: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, fmt.Errorf("failed to parse Anti-Captcha balance response: %w", err)
+	}
+
+	if errorID, ok := result["errorId"].(float64); !ok || errorID != 0 {
+		errorCode := "unknown"
+		if code, exists := result["errorCode"].(string); exists {
+			errorCode = code
+		}
+		return 0, fmt.Errorf("Anti-Captcha balance check failed: %s", errorCode)
+	}
+
+	if balance, ok := result["balance"].(float64); ok {
+		return balance, nil
+	}
+
+	return 0, fmt.Errorf("invalid Anti-Captcha balance response: %s", string(body))
+}
+
+func (cs *CaptchaSolver) getCapMonsterBalance(ctx context.Context) (float64, error) {
+	// CapMonster uses the same API as Anti-Captcha
+	payload := map[string]interface{}{
+		"clientKey": cs.config.APIKey,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal CapMonster balance request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[CapMonsterService]+"/getBalance", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create CapMonster balance request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cs.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("CapMonster balance request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read CapMonster balance response: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, fmt.Errorf("failed to parse CapMonster balance response: %w", err)
+	}
+
+	if errorID, ok := result["errorId"].(float64); !ok || errorID != 0 {
+		errorCode := "unknown"
+		if code, exists := result["errorCode"].(string); exists {
+			errorCode = code
+		}
+		return 0, fmt.Errorf("CapMonster balance check failed: %s", errorCode)
+	}
+
+	if balance, ok := result["balance"].(float64); ok {
+		return balance, nil
+	}
+
+	return 0, fmt.Errorf("invalid CapMonster balance response: %s", string(body))
+}
+
+// CapMonster service implementations (uses same API as Anti-Captcha)
+func (cs *CaptchaSolver) solveCapMonsterImage(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
+	// CapMonster uses the same API as Anti-Captcha for image solving
+	return cs.solveCapMonsterGeneric(ctx, task, "ImageToTextTask")
+}
+
+func (cs *CaptchaSolver) solveCapMonsterRecaptcha(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
+	// CapMonster reCAPTCHA v2
+	return cs.solveCapMonsterGeneric(ctx, task, "NoCaptchaTaskProxyless")
+}
+
+func (cs *CaptchaSolver) solveCapMonsterRecaptchaV3(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
+	// CapMonster reCAPTCHA v3
+	return cs.solveCapMonsterGeneric(ctx, task, "RecaptchaV3TaskProxyless")
+}
+
+func (cs *CaptchaSolver) solveCapMonsterHCaptcha(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
+	// CapMonster hCaptcha
+	return cs.solveCapMonsterGeneric(ctx, task, "HCaptchaTaskProxyless")
+}
+
+func (cs *CaptchaSolver) solveCapMonsterGeneric(ctx context.Context, task *CaptchaTask, taskType string) (*CaptchaTask, error) {
+	// Generic CapMonster task creation (same as Anti-Captcha)
+	taskData := map[string]interface{}{
+		"type": taskType,
+	}
+
+	// Configure task based on type
+	switch taskType {
+	case "ImageToTextTask":
+		taskData["body"] = task.ImageData
+		if task.Extra != nil {
+			if numeric, ok := task.Extra["numeric"].(bool); ok && numeric {
+				taskData["numeric"] = 1
+			}
+		}
+	case "NoCaptchaTaskProxyless":
+		taskData["websiteURL"] = task.PageURL
+		taskData["websiteKey"] = task.SiteKey
+	case "RecaptchaV3TaskProxyless":
+		taskData["websiteURL"] = task.PageURL
+		taskData["websiteKey"] = task.SiteKey
+		taskData["minScore"] = cs.config.MinScore
+		if task.Extra != nil {
+			if action, ok := task.Extra["action"].(string); ok {
+				taskData["pageAction"] = action
+			}
+		}
+	case "HCaptchaTaskProxyless":
+		taskData["websiteURL"] = task.PageURL
+		taskData["websiteKey"] = task.SiteKey
+	}
+
+	payload := map[string]interface{}{
+		"clientKey": cs.config.APIKey,
+		"task":      taskData,
+	}
+
+	if cs.config.SoftID != "" {
+		payload["softId"] = cs.config.SoftID
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal CapMonster request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[CapMonsterService]+"/createTask", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CapMonster request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := cs.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("CapMonster request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CapMonster response: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse CapMonster response: %w", err)
+	}
+
+	if errorID, ok := result["errorId"].(float64); !ok || errorID != 0 {
+		errorCode := "unknown"
+		if code, exists := result["errorCode"].(string); exists {
+			errorCode = code
+		}
+		return nil, fmt.Errorf("CapMonster submission failed: %s", errorCode)
+	}
+
+	if taskID, ok := result["taskId"].(float64); ok {
+		task.ID = fmt.Sprintf("%.0f", taskID)
+		task.Status = "pending"
+		
+		// Poll for solution using CapMonster API
+		return cs.pollCapMonsterResult(ctx, task)
+	}
+
+	return nil, fmt.Errorf("invalid CapMonster response: %s", string(body))
+}
+
+func (cs *CaptchaSolver) pollCapMonsterResult(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
+	// CapMonster uses same polling API as Anti-Captcha
+	timeout := time.After(cs.config.Timeout)
+	ticker := time.NewTicker(cs.config.PollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timeout:
+			return nil, fmt.Errorf("CapMonster solving timed out after %v", cs.config.Timeout)
+		case <-ticker.C:
+			payload := map[string]interface{}{
+				"clientKey": cs.config.APIKey,
+				"taskId":    task.ID,
+			}
+
+			jsonData, err := json.Marshal(payload)
+			if err != nil {
+				continue
+			}
+
+			req, err := http.NewRequestWithContext(ctx, "POST", cs.apiURLs[CapMonsterService]+"/getTaskResult", bytes.NewBuffer(jsonData))
+			if err != nil {
+				continue
+			}
+
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := cs.httpClient.Do(req)
+			if err != nil {
+				continue
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				continue
+			}
+
+			var result map[string]interface{}
+			if err := json.Unmarshal(body, &result); err != nil {
+				continue
+			}
+
+			if errorID, ok := result["errorId"].(float64); ok && errorID == 0 {
+				if status, exists := result["status"].(string); exists {
+					if status == "ready" {
+						// Solved
+						if solution, ok := result["solution"].(map[string]interface{}); ok {
+							if token, exists := solution["gRecaptchaResponse"].(string); exists {
+								task.Solution = token
+							} else if text, exists := solution["text"].(string); exists {
+								task.Solution = text
+							}
+							task.Status = "solved"
+							now := time.Now()
+							task.SolvedAt = &now
+							return task, nil
+						}
+					} else if status == "processing" {
+						continue
+					}
+				}
+			} else {
+				task.Status = "failed"
+				return nil, fmt.Errorf("CapMonster solving failed")
+			}
+		}
+	}
 }
 
 // Utility functions
