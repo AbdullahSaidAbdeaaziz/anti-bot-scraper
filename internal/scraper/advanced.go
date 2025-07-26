@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"anti-bot-scraper/internal/utils"
+	"golang.org/x/net/proxy"
 )
 
 // AdvancedScraper extends the basic scraper with additional features
@@ -61,8 +62,40 @@ type ScraperOption func(*AdvancedScraper)
 func WithProxy(proxyURL string) ScraperOption {
 	return func(s *AdvancedScraper) {
 		s.proxyURL = proxyURL
-		// TODO: Configure transport with proxy
+		s.configureProxy()
 	}
+}
+
+// configureProxy configures the HTTP transport to use a proxy
+func (a *AdvancedScraper) configureProxy() error {
+	if a.proxyURL == "" {
+		return nil
+	}
+
+	proxyParsed, err := url.Parse(a.proxyURL)
+	if err != nil {
+		return fmt.Errorf("invalid proxy URL: %v", err)
+	}
+
+	// Get the current transport
+	transport := a.client.Transport.(*http.Transport)
+
+	switch proxyParsed.Scheme {
+	case "http", "https":
+		// HTTP proxy
+		transport.Proxy = http.ProxyURL(proxyParsed)
+	case "socks5":
+		// SOCKS5 proxy
+		dialer, err := proxy.SOCKS5("tcp", proxyParsed.Host, nil, proxy.Direct)
+		if err != nil {
+			return fmt.Errorf("failed to create SOCKS5 proxy: %v", err)
+		}
+		transport.DialContext = dialer.(proxy.ContextDialer).DialContext
+	default:
+		return fmt.Errorf("unsupported proxy scheme: %s", proxyParsed.Scheme)
+	}
+
+	return nil
 }
 
 // WithRetryCount sets the number of retries

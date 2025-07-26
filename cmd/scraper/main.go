@@ -22,6 +22,7 @@ var (
 	output         = flag.String("output", "text", "Output format (text, json)")
 	retries        = flag.Int("retries", 3, "Number of retries")
 	rateLimit      = flag.Duration("rate-limit", 1*time.Second, "Rate limit between requests")
+	proxy          = flag.String("proxy", "", "Proxy URL (http://proxy:port or socks5://proxy:port)")
 	userAgent      = flag.String("user-agent", "", "Custom User-Agent (overrides browser default)")
 	timeout        = flag.Duration("timeout", 30*time.Second, "Request timeout")
 	verbose        = flag.Bool("verbose", false, "Verbose output")
@@ -75,12 +76,22 @@ func main() {
 		log.Fatal("Error:", err)
 	}
 
-	// Create scraper with options
-	s, err := scraper.NewAdvancedScraper(
-		fingerprint,
+	// Create scraper options
+	options := []scraper.ScraperOption{
 		scraper.WithRetryCount(*retries),
 		scraper.WithRateLimit(*rateLimit),
-	)
+	}
+
+	// Add proxy if provided
+	if *proxy != "" {
+		if *verbose {
+			log.Printf("Using proxy: %s", *proxy)
+		}
+		options = append(options, scraper.WithProxy(*proxy))
+	}
+
+	// Create scraper with options
+	s, err := scraper.NewAdvancedScraper(fingerprint, options...)
 	if err != nil {
 		log.Fatal("Failed to create scraper:", err)
 	}

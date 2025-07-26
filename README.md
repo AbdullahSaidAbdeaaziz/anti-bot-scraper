@@ -35,6 +35,7 @@ go build -o bin/scraper.exe ./cmd/scraper
 | `-data` | POST data (JSON or @filename) | - |
 | `-headers` | Custom headers (JSON or @filename) | - |
 | `-output` | Output format (text, json) | text |
+| `-proxy` | Proxy URL (http://proxy:port, socks5://proxy:port) | - |
 | `-retries` | Number of retries | 3 |
 | `-rate-limit` | Rate limit between requests | 1s |
 | `-timeout` | Request timeout | 30s |

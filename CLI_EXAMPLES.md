@@ -27,6 +27,18 @@
 
 ## Advanced Usage
 
+### Proxy Support
+```bash
+# HTTP proxy
+./bin/scraper.exe -url https://httpbin.org/ip -proxy http://proxy.example.com:8080
+
+# SOCKS5 proxy
+./bin/scraper.exe -url https://httpbin.org/ip -proxy socks5://proxy.example.com:1080
+
+# Proxy with authentication (HTTP Basic)
+./bin/scraper.exe -url https://httpbin.org/ip -proxy http://username:password@proxy.example.com:8080
+```
+
 ### Custom User-Agent
 ```bash
 ./bin/scraper.exe -url https://httpbin.org/headers -user-agent "Custom Bot 1.0"
