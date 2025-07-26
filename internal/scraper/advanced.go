@@ -53,9 +53,14 @@ type RateLimiter struct {
 	minInterval time.Duration
 }
 
-// NewAdvancedScraper creates a new advanced scraper
+// NewAdvancedScraper creates a new advanced scraper (HTTP/1.1 for compatibility)
 func NewAdvancedScraper(fingerprint Fingerprint, options ...ScraperOption) (*AdvancedScraper, error) {
-	baseScraper, err := NewScraper(fingerprint)
+	return NewAdvancedScraperWithProtocol(fingerprint, HTTP1_1, options...)
+}
+
+// NewAdvancedScraperWithProtocol creates a new advanced scraper with specified protocol
+func NewAdvancedScraperWithProtocol(fingerprint Fingerprint, protocol ProtocolVersion, options ...ScraperOption) (*AdvancedScraper, error) {
+	baseScraper, err := NewScraperWithProtocol(fingerprint, protocol)
 	if err != nil {
 		return nil, err
 	}

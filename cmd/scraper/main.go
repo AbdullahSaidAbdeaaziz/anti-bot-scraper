@@ -25,6 +25,7 @@ var (
 	proxy          = flag.String("proxy", "", "Single proxy URL (http://proxy:port or socks5://proxy:port)")
 	proxies        = flag.String("proxies", "", "Multiple proxies separated by comma for rotation")
 	proxyRotation  = flag.String("proxy-rotation", "per-request", "Proxy rotation mode: 'per-request' or 'on-error'")
+	httpVersion    = flag.String("http-version", "1.1", "HTTP version: '1.1', '2', or 'auto'")
 	userAgent      = flag.String("user-agent", "", "Custom User-Agent (overrides browser default)")
 	timeout        = flag.Duration("timeout", 30*time.Second, "Request timeout")
 	verbose        = flag.Bool("verbose", false, "Verbose output")
@@ -115,8 +116,25 @@ func main() {
 		options = append(options, scraper.WithProxy(*proxy))
 	}
 
+	// Parse HTTP version
+	var protocol scraper.ProtocolVersion
+	switch *httpVersion {
+	case "1.1":
+		protocol = scraper.HTTP1_1
+	case "2":
+		protocol = scraper.HTTP2
+	case "auto":
+		protocol = scraper.HTTPAuto
+	default:
+		log.Fatal("Invalid HTTP version. Use '1.1', '2', or 'auto'")
+	}
+
+	if *verbose {
+		log.Printf("HTTP Version: %s", *httpVersion)
+	}
+
 	// Create scraper with options
-	s, err := scraper.NewAdvancedScraper(fingerprint, options...)
+	s, err := scraper.NewAdvancedScraperWithProtocol(fingerprint, protocol, options...)
 	if err != nil {
 		log.Fatal("Failed to create scraper:", err)
 	}
