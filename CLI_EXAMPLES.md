@@ -29,14 +29,20 @@
 
 ### Proxy Support
 ```bash
-# HTTP proxy
+# Single HTTP proxy
 ./bin/scraper.exe -url https://httpbin.org/ip -proxy http://proxy.example.com:8080
 
-# SOCKS5 proxy
+# Single SOCKS5 proxy
 ./bin/scraper.exe -url https://httpbin.org/ip -proxy socks5://proxy.example.com:1080
 
 # Proxy with authentication (HTTP Basic)
 ./bin/scraper.exe -url https://httpbin.org/ip -proxy http://username:password@proxy.example.com:8080
+
+# Multiple proxies with rotation per request
+./bin/scraper.exe -url https://httpbin.org/ip -proxies "http://proxy1.com:8080,http://proxy2.com:8080,socks5://proxy3.com:1080" -proxy-rotation per-request
+
+# Multiple proxies with rotation only on error/timeout
+./bin/scraper.exe -url https://httpbin.org/ip -proxies "http://proxy1.com:8080,http://proxy2.com:8080" -proxy-rotation on-error -verbose
 ```
 
 ### Custom User-Agent

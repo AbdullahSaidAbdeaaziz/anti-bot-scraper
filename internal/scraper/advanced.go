@@ -6,19 +6,39 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"anti-bot-scraper/internal/utils"
+
 	"golang.org/x/net/proxy"
 )
+
+// ProxyRotationMode defines how proxies should be rotated
+type ProxyRotationMode int
+
+const (
+	RotatePerRequest ProxyRotationMode = iota // Rotate on every request
+	RotateOnError                             // Rotate only on timeout/error/block
+)
+
+// ProxyRotator manages proxy rotation
+type ProxyRotator struct {
+	proxies     []string
+	current     int
+	mode        ProxyRotationMode
+	mutex       sync.RWMutex
+	failedCount map[string]int // Track failures per proxy
+}
 
 // AdvancedScraper extends the basic scraper with additional features
 type AdvancedScraper struct {
 	*Scraper
-	cookieJar   *CookieJar
-	proxyURL    string
-	retryCount  int
-	rateLimiter *RateLimiter
+	cookieJar    *CookieJar
+	proxyURL     string        // Single proxy (deprecated, use proxyRotator)
+	proxyRotator *ProxyRotator // Multi-proxy rotation
+	retryCount   int
+	rateLimiter  *RateLimiter
 }
 
 // CookieJar manages cookies for the scraper
@@ -57,6 +77,61 @@ func NewAdvancedScraper(fingerprint Fingerprint, options ...ScraperOption) (*Adv
 
 // ScraperOption configures the advanced scraper
 type ScraperOption func(*AdvancedScraper)
+
+// NewProxyRotator creates a new proxy rotator
+func NewProxyRotator(proxies []string, mode ProxyRotationMode) *ProxyRotator {
+	return &ProxyRotator{
+		proxies:     proxies,
+		current:     0,
+		mode:        mode,
+		failedCount: make(map[string]int),
+	}
+}
+
+// GetNext returns the next proxy based on rotation mode
+func (pr *ProxyRotator) GetNext() string {
+	pr.mutex.Lock()
+	defer pr.mutex.Unlock()
+
+	if len(pr.proxies) == 0 {
+		return ""
+	}
+
+	if pr.mode == RotatePerRequest {
+		// Always rotate to next proxy
+		proxy := pr.proxies[pr.current]
+		pr.current = (pr.current + 1) % len(pr.proxies)
+		return proxy
+	}
+
+	// RotateOnError mode - return current proxy
+	return pr.proxies[pr.current]
+}
+
+// MarkFailed marks a proxy as failed and rotates to next if needed
+func (pr *ProxyRotator) MarkFailed(proxyURL string) {
+	pr.mutex.Lock()
+	defer pr.mutex.Unlock()
+
+	pr.failedCount[proxyURL]++
+
+	// Rotate to next proxy on failure
+	pr.current = (pr.current + 1) % len(pr.proxies)
+}
+
+// GetFailureCount returns the failure count for a proxy
+func (pr *ProxyRotator) GetFailureCount(proxyURL string) int {
+	pr.mutex.RLock()
+	defer pr.mutex.RUnlock()
+	return pr.failedCount[proxyURL]
+}
+
+// WithProxyRotation sets up proxy rotation for the scraper
+func WithProxyRotation(proxies []string, mode ProxyRotationMode) ScraperOption {
+	return func(s *AdvancedScraper) {
+		s.proxyRotator = NewProxyRotator(proxies, mode)
+	}
+}
 
 // WithProxy sets a proxy for the scraper
 func WithProxy(proxyURL string) ScraperOption {
@@ -117,6 +192,19 @@ func (a *AdvancedScraper) GetWithRetry(targetURL string) (*Response, error) {
 	var lastErr error
 
 	for i := 0; i <= a.retryCount; i++ {
+		// Configure proxy rotation if enabled
+		if a.proxyRotator != nil {
+			currentProxy := a.proxyRotator.GetNext()
+			if currentProxy != "" {
+				a.proxyURL = currentProxy
+				if err := a.configureProxy(); err != nil {
+					// Mark proxy as failed and continue with next
+					a.proxyRotator.MarkFailed(currentProxy)
+					continue
+				}
+			}
+		}
+
 		// Rate limiting
 		a.rateLimiter.Wait()
 
@@ -128,6 +216,11 @@ func (a *AdvancedScraper) GetWithRetry(targetURL string) (*Response, error) {
 			// Save cookies
 			a.saveCookies(targetURL, response.Headers)
 			return response, nil
+		}
+
+		// Mark proxy as failed if we're using rotation and got an error
+		if a.proxyRotator != nil && a.proxyURL != "" {
+			a.proxyRotator.MarkFailed(a.proxyURL)
 		}
 
 		lastErr = err
@@ -150,6 +243,19 @@ func (a *AdvancedScraper) PostWithRetry(targetURL string, data map[string]string
 	var lastErr error
 
 	for i := 0; i <= a.retryCount; i++ {
+		// Configure proxy rotation if enabled
+		if a.proxyRotator != nil {
+			currentProxy := a.proxyRotator.GetNext()
+			if currentProxy != "" {
+				a.proxyURL = currentProxy
+				if err := a.configureProxy(); err != nil {
+					// Mark proxy as failed and continue with next
+					a.proxyRotator.MarkFailed(currentProxy)
+					continue
+				}
+			}
+		}
+
 		a.rateLimiter.Wait()
 		utils.RandomDelay(100, 500)
 
@@ -185,6 +291,11 @@ func (a *AdvancedScraper) PostWithRetry(targetURL string, data map[string]string
 
 			a.saveCookies(targetURL, response.Headers)
 			return response, nil
+		}
+
+		// Mark proxy as failed if we're using rotation and got an error
+		if a.proxyRotator != nil && a.proxyURL != "" {
+			a.proxyRotator.MarkFailed(a.proxyURL)
 		}
 
 		lastErr = err
