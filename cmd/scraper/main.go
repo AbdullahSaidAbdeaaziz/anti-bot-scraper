@@ -51,13 +51,28 @@ var (
 	enableTypingDelay    = flag.Bool("enable-typing-delay", true, "Enable realistic typing delays")
 	enableRandomActivity = flag.Bool("enable-random-activity", false, "Enable random page interactions")
 	showBehaviorInfo     = flag.Bool("show-behavior-info", false, "Show behavior simulation information")
-	httpVersion          = flag.String("http-version", "1.1", "HTTP version: '1.1', '2', or 'auto'")
-	userAgent            = flag.String("user-agent", "", "Custom User-Agent (overrides browser default)")
-	timeout              = flag.Duration("timeout", 30*time.Second, "Request timeout")
-	verbose              = flag.Bool("verbose", false, "Verbose output")
-	showHeaders          = flag.Bool("show-headers", false, "Show response headers")
-	followRedirect       = flag.Bool("follow-redirect", true, "Follow redirects")
-	version              = flag.Bool("version", false, "Show version information")
+	// Performance Optimization Flags
+	enableConcurrent     = flag.Bool("enable-concurrent", false, "Enable concurrent request processing")
+	maxConcurrent        = flag.Int("max-concurrent", 10, "Maximum concurrent requests")
+	workerPoolSize       = flag.Int("worker-pool-size", 5, "Number of worker goroutines")
+	requestsPerSecond    = flag.Float64("requests-per-second", 5.0, "Rate limit in requests per second")
+	connectionPoolSize   = flag.Int("connection-pool-size", 20, "HTTP connection pool size")
+	maxIdleConns         = flag.Int("max-idle-conns", 10, "Maximum idle connections")
+	idleConnTimeout      = flag.Duration("idle-conn-timeout", 90*time.Second, "Idle connection timeout")
+	queueSize            = flag.Int("queue-size", 1000, "Request queue size")
+	showPerformanceStats = flag.Bool("show-performance-stats", false, "Show performance statistics")
+	// Memory Optimization Flags
+	enableMemoryOpt        = flag.Bool("enable-memory-optimization", false, "Enable memory optimization")
+	maxMemoryMB            = flag.Int64("max-memory-mb", 512, "Maximum memory usage in MB")
+	enableIntelligentQueue = flag.Bool("enable-intelligent-queue", false, "Enable priority-based intelligent queueing")
+	showMemoryStats        = flag.Bool("show-memory-stats", false, "Show memory usage statistics")
+	httpVersion            = flag.String("http-version", "1.1", "HTTP version: '1.1', '2', or 'auto'")
+	userAgent              = flag.String("user-agent", "", "Custom User-Agent (overrides browser default)")
+	timeout                = flag.Duration("timeout", 30*time.Second, "Request timeout")
+	verbose                = flag.Bool("verbose", false, "Verbose output")
+	showHeaders            = flag.Bool("show-headers", false, "Show response headers")
+	followRedirect         = flag.Bool("follow-redirect", true, "Follow redirects")
+	version                = flag.Bool("version", false, "Show version information")
 	// JavaScript Engine Flags
 	enableJS       = flag.Bool("enable-js", false, "Enable JavaScript engine for dynamic content")
 	jsTimeout      = flag.Duration("js-timeout", 30*time.Second, "JavaScript execution timeout")
@@ -308,6 +323,12 @@ func main() {
 		}
 	}
 
+	// Handle concurrent requests if enabled
+	if *enableConcurrent {
+		handleConcurrentRequests(s)
+		return
+	}
+
 	var response *scraper.Response
 
 	// Execute request based on method
@@ -504,4 +525,200 @@ func parseViewportDimension(s string) (int64, error) {
 	var result int64
 	_, err := fmt.Sscanf(s, "%d", &result)
 	return result, err
+}
+
+// handleConcurrentRequests handles concurrent request processing
+func handleConcurrentRequests(s *scraper.AdvancedScraper) {
+	var err error
+
+	if *verbose {
+		log.Printf("Starting concurrent request processing...")
+		log.Printf("Configuration: max_concurrent=%d, worker_pool_size=%d, requests_per_second=%.2f",
+			*maxConcurrent, *workerPoolSize, *requestsPerSecond)
+		log.Printf("Connection pool: size=%d, max_idle=%d, idle_timeout=%v",
+			*connectionPoolSize, *maxIdleConns, *idleConnTimeout)
+		if *enableMemoryOpt {
+			log.Printf("Memory optimization enabled: max_memory=%dMB", *maxMemoryMB)
+		}
+		if *enableIntelligentQueue {
+			log.Printf("Intelligent priority queueing enabled")
+		}
+	}
+
+	// Create memory optimizer if enabled
+	var memOptimizer *scraper.MemoryOptimizer
+	if *enableMemoryOpt {
+		memOptimizer = scraper.NewMemoryOptimizer(*maxMemoryMB)
+		if *verbose {
+			log.Printf("Memory optimizer initialized with %dMB limit", *maxMemoryMB)
+		}
+	}
+
+	// Create intelligent queue if enabled
+	var intelligentQueue *scraper.IntelligentQueue
+	if *enableIntelligentQueue {
+		intelligentQueue = scraper.NewIntelligentQueue(*queueSize)
+		if *verbose {
+			log.Printf("Intelligent queue initialized with priority levels")
+		}
+	}
+
+	// Create concurrent engine configuration
+	config := scraper.ConcurrencyConfig{
+		MaxConcurrent:     *maxConcurrent,
+		WorkerPoolSize:    *workerPoolSize,
+		RequestBuffer:     *queueSize,
+		RateLimitPerSec:   int(*requestsPerSecond),
+		ConnectionTimeout: *timeout,
+		IdleTimeout:       *idleConnTimeout,
+		MaxIdleConns:      *maxIdleConns,
+		MaxConnsPerHost:   *connectionPoolSize,
+	}
+
+	// Create concurrent engine (worker pool)
+	engine := scraper.NewWorkerPool(s, config)
+	defer engine.Stop()
+
+	// Start the worker pool
+	err = engine.Start()
+	if err != nil {
+		log.Fatal("Failed to start worker pool:", err)
+	}
+
+	if *verbose {
+		log.Printf("Concurrent engine initialized and started successfully")
+	}
+
+	// Create a sample job (in real usage, jobs would come from various sources)
+	var postData []byte
+	if strings.ToUpper(*method) == "POST" {
+		if *data == "" {
+			log.Fatal("POST data is required for POST requests")
+		}
+
+		// Parse POST data
+		postDataMap, err := parsePostData(*data)
+		if err != nil {
+			log.Fatal("Failed to parse POST data:", err)
+		}
+
+		// Convert to form encoded data
+		formData := make([]string, 0, len(postDataMap))
+		for key, value := range postDataMap {
+			formData = append(formData, fmt.Sprintf("%s=%s", key, value))
+		}
+		postData = []byte(strings.Join(formData, "&"))
+	}
+
+	// Create request job with priority
+	priority := 5 // Default normal priority
+	if *enableIntelligentQueue {
+		priority = 7 // Higher priority for demonstration
+	}
+
+	job := &scraper.RequestJob{
+		ID:         "sample-job-1",
+		URL:        *url,
+		Method:     strings.ToUpper(*method),
+		Data:       postData,
+		Options:    make(map[string]interface{}),
+		ResultChan: make(chan *scraper.JobResult, 1),
+		CreatedAt:  time.Now(),
+		Priority:   priority,
+	}
+
+	// Check memory before submitting job if optimization is enabled
+	if memOptimizer != nil {
+		if memOptimizer.CheckMemoryUsage() {
+			if *verbose {
+				log.Printf("Memory usage high, garbage collection triggered")
+			}
+		}
+	}
+
+	// Submit job via intelligent queue or regular queue
+	if intelligentQueue != nil {
+		err = intelligentQueue.EnqueueJob(job)
+		if err != nil {
+			log.Fatal("Failed to enqueue job:", err)
+		}
+
+		// Dequeue and submit to worker pool
+		if dequeuedJob, ok := intelligentQueue.DequeueJob(); ok {
+			err = engine.SubmitJob(dequeuedJob)
+			if err != nil {
+				log.Fatal("Failed to submit job:", err)
+			}
+		}
+	} else {
+		err = engine.SubmitJob(job)
+		if err != nil {
+			log.Fatal("Failed to submit job:", err)
+		}
+	}
+
+	// Submit job
+	if *verbose {
+		log.Printf("Submitting %s request job for: %s (priority: %d)", job.Method, job.URL, job.Priority)
+	}
+
+	// Wait for result
+	if *verbose {
+		log.Printf("Waiting for job result...")
+	}
+
+	select {
+	case result := <-job.ResultChan:
+		if result.Error != nil {
+			log.Fatal("Job failed:", result.Error)
+		}
+
+		if *verbose {
+			log.Printf("Job completed successfully in %v", result.Duration)
+		}
+
+		// Output results
+		outputResponse(result.Response, *output, *showHeaders, *verbose)
+
+		// Show performance stats if requested
+		if *showPerformanceStats {
+			stats := engine.GetStats()
+			fmt.Printf("\n=== Performance Statistics ===\n")
+			fmt.Printf("Total Jobs Processed: %d\n", stats.TotalJobs)
+			fmt.Printf("Completed Jobs: %d\n", stats.CompletedJobs)
+			fmt.Printf("Failed Jobs: %d\n", stats.FailedJobs)
+			fmt.Printf("Average Latency: %v\n", stats.AverageLatency)
+			fmt.Printf("Requests Per Second: %.2f\n", stats.RequestsPerSec)
+			fmt.Printf("Active Workers: %d\n", stats.ActiveWorkers)
+			fmt.Printf("Queue Length: %d\n", stats.QueueLength)
+		}
+
+		// Show memory stats if requested
+		if *showMemoryStats && memOptimizer != nil {
+			memStats := memOptimizer.GetMemoryStats()
+			fmt.Printf("\n=== Memory Statistics ===\n")
+			if statsJSON, err := json.MarshalIndent(memStats, "", "  "); err == nil {
+				fmt.Println(string(statsJSON))
+			}
+		}
+
+		// Show intelligent queue stats if enabled
+		if *enableIntelligentQueue && intelligentQueue != nil {
+			queueStats := intelligentQueue.GetQueueStats()
+			fmt.Printf("\n=== Queue Statistics ===\n")
+			fmt.Printf("High Priority Jobs: %d\n", queueStats.HighPriorityJobs)
+			fmt.Printf("Normal Priority Jobs: %d\n", queueStats.NormalPriorityJobs)
+			fmt.Printf("Low Priority Jobs: %d\n", queueStats.LowPriorityJobs)
+			fmt.Printf("Total Queued: %d\n", queueStats.TotalQueued)
+			fmt.Printf("Dropped Jobs: %d\n", queueStats.DroppedJobs)
+		}
+
+	case <-time.After(60 * time.Second):
+		log.Fatal("Job timed out after 60 seconds")
+	}
+
+	// Cleanup
+	if intelligentQueue != nil {
+		intelligentQueue.Close()
+	}
 }

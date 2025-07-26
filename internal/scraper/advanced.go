@@ -461,6 +461,118 @@ func EnableBehaviorSimulation() ScraperOption {
 	}
 }
 
+// Get performs a simple GET request
+func (a *AdvancedScraper) Get(targetURL string) (*Response, error) {
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GET request: %w", err)
+	}
+
+	// Add default headers
+	for key, value := range a.headers {
+		req.Header.Set(key, value)
+	}
+
+	// Add cookies
+	a.addCookies(req, targetURL)
+
+	// Execute request
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute GET request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Convert headers
+	headers := make(map[string][]string)
+	for key, values := range resp.Header {
+		headers[key] = values
+	}
+
+	return &Response{
+		StatusCode: resp.StatusCode,
+		Headers:    headers,
+		Body:       string(body),
+		URL:        resp.Request.URL.String(),
+	}, nil
+}
+
+// Post performs a simple POST request
+func (a *AdvancedScraper) Post(targetURL string, data interface{}) (*Response, error) {
+	var bodyReader io.Reader
+	var contentType string
+
+	// Handle different data types
+	switch v := data.(type) {
+	case map[string]string:
+		// Convert to form values
+		formData := url.Values{}
+		for key, value := range v {
+			formData.Set(key, value)
+		}
+		bodyReader = strings.NewReader(formData.Encode())
+		contentType = "application/x-www-form-urlencoded"
+	case []byte:
+		bodyReader = strings.NewReader(string(v))
+		contentType = "application/octet-stream"
+	case string:
+		bodyReader = strings.NewReader(v)
+		contentType = "text/plain"
+	default:
+		return nil, fmt.Errorf("unsupported data type: %T", data)
+	}
+
+	req, err := http.NewRequest("POST", targetURL, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create POST request: %w", err)
+	}
+
+	// Set content type
+	req.Header.Set("Content-Type", contentType)
+
+	// Add default headers
+	for key, value := range a.headers {
+		if key != "Content-Type" { // Don't override content-type
+			req.Header.Set(key, value)
+		}
+	}
+
+	// Add cookies
+	a.addCookies(req, targetURL)
+
+	// Execute request
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute POST request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Convert headers
+	headers := make(map[string][]string)
+	for key, values := range resp.Header {
+		headers[key] = values
+	}
+
+	return &Response{
+		StatusCode: resp.StatusCode,
+		Headers:    headers,
+		Body:       string(body),
+		URL:        resp.Request.URL.String(),
+	}, nil
+}
+
 // GetWithRetry performs a GET request with retry logic
 func (a *AdvancedScraper) GetWithRetry(targetURL string) (*Response, error) {
 	var lastErr error
