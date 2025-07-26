@@ -1,92 +1,54 @@
 # Anti-Bot TLS Fingerprint Scraper
 
-This project implements an advanced web scraper that uses TLS fingerprinting techniques to bypass anti-bot detection systems.
+Advanced web scraper using TLS fingerprinting to bypass anti-bot detection systems by mimicking real browser traffic.
 
 ## Features
 
-- **TLS Fingerprinting**: Uses uTLS library to mimic real browser signatures (Chrome, Firefox, Safari, Edge)
-- **HTTP/2 Support**: Custom implementation to handle modern web protocols
-- **Anti-Detection**: Custom headers, user agent rotation, rate limiting
-- **Cookie Management**: Automatic session handling and persistence
-- **CLI Interface**: Easy-to-use command-line tool
-- **Advanced Features**: Retry logic, proxy support, custom headers
+- **TLS Fingerprinting**: Uses uTLS library to mimic Chrome, Firefox, Safari, Edge signatures
+- **Anti-Detection**: Browser-specific headers, rate limiting, retry logic
+- **Cookie Management**: Automatic session handling and persistence  
+- **CLI Interface**: Easy-to-use command-line tool with comprehensive options
 
 ## Quick Start
 
-### Build the CLI tool
 ```bash
+# Build
 go build -o bin/scraper.exe ./cmd/scraper
-```
 
-### Basic usage
-```bash
-# Simple GET request
+# Basic usage
 ./bin/scraper.exe -url https://httpbin.org/headers
 
-# Different browser fingerprints
-./bin/scraper.exe -url https://httpbin.org/headers -browser firefox -verbose
+# Different browsers
+./bin/scraper.exe -url https://httpbin.org/headers -browser firefox
 
-# POST request with data
-./bin/scraper.exe -url https://httpbin.org/post -method POST -data "@test_data.json"
+# POST request  
+./bin/scraper.exe -url https://httpbin.org/post -method POST -data '{"key":"value"}'
 ```
 
-## CLI Reference
+## Command Line Options
 
-### Command Line Options
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-url` | Target URL (required) | - |
+| `-browser` | Browser fingerprint (chrome, firefox, safari, edge) | chrome |
+| `-method` | HTTP method (GET, POST) | GET |
+| `-data` | POST data (JSON or @filename) | - |
+| `-headers` | Custom headers (JSON or @filename) | - |
+| `-output` | Output format (text, json) | text |
+| `-retries` | Number of retries | 3 |
+| `-rate-limit` | Rate limit between requests | 1s |
+| `-timeout` | Request timeout | 30s |
+| `-verbose` | Verbose output | false |
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `-url` | string | required | URL to scrape |
-| `-browser` | string | chrome | Browser fingerprint (chrome, firefox, safari, edge) |
-| `-method` | string | GET | HTTP method (GET, POST) |
-| `-headers` | string | | Custom headers in JSON format or @filename |
-| `-data` | string | | POST data in JSON format or @filename |
-| `-output` | string | text | Output format (text, json) |
-| `-retries` | int | 3 | Number of retries |
-| `-rate-limit` | duration | 1s | Rate limit between requests |
-| `-user-agent` | string | | Custom User-Agent (overrides browser default) |
-| `-timeout` | duration | 30s | Request timeout |
-| `-verbose` | bool | false | Verbose output |
-| `-show-headers` | bool | false | Show response headers |
-| `-version` | bool | false | Show version information |
+## Examples
 
-### Examples
-
-```bash
-# Chrome fingerprint with verbose output
-./bin/scraper.exe -url https://httpbin.org/headers -browser chrome -verbose
-
-# Firefox with custom headers
-./bin/scraper.exe -url https://httpbin.org/headers -browser firefox -headers "@headers.json"
-
-# POST request with form data
-./bin/scraper.exe -url https://httpbin.org/post -method POST -data "@login.json"
-
-# JSON output with rate limiting
-./bin/scraper.exe -url https://example.com -output json -rate-limit 3s -retries 5
-```
+See `CLI_EXAMPLES.md` for comprehensive usage examples.
 
 ## Dependencies
 
 - [uTLS](https://github.com/refraction-networking/utls) - TLS fingerprinting library
-- Go 1.21+ - Modern Go features
+- Go 1.21+ required
 
-## Usage as Library
+## License
 
-```go
-package main
-
-import (
-    "fmt"
-    "anti-bot-scraper/internal/scraper"
-)
-
-func main() {
-    s := scraper.NewScraper()
-    response, err := s.Get("https://example.com")
-    if err != nil {
-        panic(err)
-    }
-    fmt.Println(response)
-}
-```
+MIT License
