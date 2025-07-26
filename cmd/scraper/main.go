@@ -14,24 +14,49 @@ import (
 
 var (
 	// Command line flags
-	url            = flag.String("url", "", "URL to scrape (required)")
-	browser        = flag.String("browser", "chrome", "Browser fingerprint (chrome, firefox, safari, edge)")
-	method         = flag.String("method", "GET", "HTTP method (GET, POST)")
-	headers        = flag.String("headers", "", "Custom headers in JSON format or @filename to read from file")
-	data           = flag.String("data", "", "POST data in JSON format or @filename to read from file")
-	output         = flag.String("output", "text", "Output format (text, json)")
-	retries        = flag.Int("retries", 3, "Number of retries")
-	rateLimit      = flag.Duration("rate-limit", 1*time.Second, "Rate limit between requests")
-	proxy          = flag.String("proxy", "", "Single proxy URL (http://proxy:port or socks5://proxy:port)")
-	proxies        = flag.String("proxies", "", "Multiple proxies separated by comma for rotation")
-	proxyRotation  = flag.String("proxy-rotation", "per-request", "Proxy rotation mode: 'per-request' or 'on-error'")
-	httpVersion    = flag.String("http-version", "1.1", "HTTP version: '1.1', '2', or 'auto'")
-	userAgent      = flag.String("user-agent", "", "Custom User-Agent (overrides browser default)")
-	timeout        = flag.Duration("timeout", 30*time.Second, "Request timeout")
-	verbose        = flag.Bool("verbose", false, "Verbose output")
-	showHeaders    = flag.Bool("show-headers", false, "Show response headers")
-	followRedirect = flag.Bool("follow-redirect", true, "Follow redirects")
-	version        = flag.Bool("version", false, "Show version information")
+	url           = flag.String("url", "", "URL to scrape (required)")
+	browser       = flag.String("browser", "chrome", "Browser fingerprint (chrome, firefox, safari, edge)")
+	method        = flag.String("method", "GET", "HTTP method (GET, POST)")
+	headers       = flag.String("headers", "", "Custom headers in JSON format or @filename to read from file")
+	data          = flag.String("data", "", "POST data in JSON format or @filename to read from file")
+	output        = flag.String("output", "text", "Output format (text, json)")
+	retries       = flag.Int("retries", 3, "Number of retries")
+	rateLimit     = flag.Duration("rate-limit", 1*time.Second, "Rate limit between requests")
+	proxy         = flag.String("proxy", "", "Single proxy URL (http://proxy:port or socks5://proxy:port)")
+	proxies       = flag.String("proxies", "", "Multiple proxies separated by comma for rotation")
+	proxyRotation = flag.String("proxy-rotation", "per-request", "Proxy rotation mode: 'per-request', 'on-error', or 'health-aware'")
+	// Proxy Health Monitoring Flags
+	enableProxyHealth   = flag.Bool("enable-proxy-health", false, "Enable proxy health monitoring")
+	proxyHealthInterval = flag.Duration("proxy-health-interval", 5*time.Minute, "Proxy health check interval")
+	proxyHealthTimeout  = flag.Duration("proxy-health-timeout", 10*time.Second, "Proxy health check timeout")
+	proxyHealthTestURL  = flag.String("proxy-health-test-url", "https://httpbin.org/ip", "URL to test proxy health")
+	proxyMaxFailures    = flag.Int("proxy-max-failures", 3, "Max consecutive failures before disabling proxy")
+	showProxyMetrics    = flag.Bool("show-proxy-metrics", false, "Show proxy health metrics after request")
+	// CAPTCHA Solving Flags
+	enableCaptcha       = flag.Bool("enable-captcha", false, "Enable automatic CAPTCHA detection and solving")
+	captchaService      = flag.String("captcha-service", "2captcha", "CAPTCHA solving service: '2captcha', 'deathbycaptcha', 'anticaptcha'")
+	captchaAPIKey       = flag.String("captcha-api-key", "", "API key for CAPTCHA solving service")
+	captchaTimeout      = flag.Duration("captcha-timeout", 5*time.Minute, "CAPTCHA solving timeout")
+	captchaPollInterval = flag.Duration("captcha-poll-interval", 5*time.Second, "CAPTCHA solution polling interval")
+	captchaMaxRetries   = flag.Int("captcha-max-retries", 3, "Max retries for CAPTCHA solving")
+	captchaMinScore     = flag.Float64("captcha-min-score", 0.3, "Minimum score for reCAPTCHA v3 (0.1-0.9)")
+	showCaptchaInfo     = flag.Bool("show-captcha-info", false, "Show CAPTCHA detection and solving information")
+	httpVersion         = flag.String("http-version", "1.1", "HTTP version: '1.1', '2', or 'auto'")
+	userAgent           = flag.String("user-agent", "", "Custom User-Agent (overrides browser default)")
+	timeout             = flag.Duration("timeout", 30*time.Second, "Request timeout")
+	verbose             = flag.Bool("verbose", false, "Verbose output")
+	showHeaders         = flag.Bool("show-headers", false, "Show response headers")
+	followRedirect      = flag.Bool("follow-redirect", true, "Follow redirects")
+	version             = flag.Bool("version", false, "Show version information")
+	// JavaScript Engine Flags
+	enableJS       = flag.Bool("enable-js", false, "Enable JavaScript engine for dynamic content")
+	jsTimeout      = flag.Duration("js-timeout", 30*time.Second, "JavaScript execution timeout")
+	jsMode         = flag.String("js-mode", "standard", "JavaScript mode: 'standard', 'behavior', 'wait-element'")
+	jsWaitSelector = flag.String("js-wait-selector", "", "CSS selector to wait for (requires js-mode=wait-element)")
+	jsCode         = flag.String("js-code", "", "Custom JavaScript code to execute")
+	headless       = flag.Bool("headless", true, "Run browser in headless mode")
+	viewport       = flag.String("viewport", "1920x1080", "Browser viewport size (WIDTHxHEIGHT)")
+	noImages       = flag.Bool("no-images", false, "Disable image loading for faster execution")
 )
 
 const (
@@ -99,14 +124,34 @@ func main() {
 			rotationMode = scraper.RotatePerRequest
 		case "on-error":
 			rotationMode = scraper.RotateOnError
+		case "health-aware":
+			rotationMode = scraper.HealthAware
 		default:
-			log.Fatal("Invalid proxy rotation mode. Use 'per-request' or 'on-error'")
+			log.Fatal("Invalid proxy rotation mode. Use 'per-request', 'on-error', or 'health-aware'")
 		}
 
 		if *verbose {
 			log.Printf("Using proxy rotation with %d proxies, mode: %s", len(proxyList), *proxyRotation)
 		}
-		options = append(options, scraper.WithProxyRotation(proxyList, rotationMode))
+
+		// Use health-aware proxy rotation if requested or health monitoring is enabled
+		if rotationMode == scraper.HealthAware || *enableProxyHealth {
+			healthConfig := scraper.ProxyHealthConfig{
+				CheckInterval: *proxyHealthInterval,
+				Timeout:       *proxyHealthTimeout,
+				TestURL:       *proxyHealthTestURL,
+				MaxFailures:   *proxyMaxFailures,
+			}
+
+			if *verbose {
+				log.Printf("Enabling proxy health monitoring with %d proxies", len(proxyList))
+				log.Printf("Health check interval: %v, timeout: %v", *proxyHealthInterval, *proxyHealthTimeout)
+			}
+
+			options = append(options, scraper.WithHealthAwareProxyRotation(proxyList, healthConfig))
+		} else {
+			options = append(options, scraper.WithProxyRotation(proxyList, rotationMode))
+		}
 
 	} else if *proxy != "" {
 		// Single proxy
@@ -114,6 +159,44 @@ func main() {
 			log.Printf("Using single proxy: %s", *proxy)
 		}
 		options = append(options, scraper.WithProxy(*proxy))
+	}
+
+	// Add CAPTCHA configuration
+	if *enableCaptcha {
+		if *captchaAPIKey == "" {
+			log.Fatal("CAPTCHA API key is required when CAPTCHA solving is enabled")
+		}
+
+		var service scraper.CaptchaService
+		switch *captchaService {
+		case "2captcha":
+			service = scraper.TwoCaptchaService
+		case "deathbycaptcha":
+			service = scraper.DeathByCaptchaService
+		case "anticaptcha":
+			service = scraper.AntiCaptchaService
+		case "capmonster":
+			service = scraper.CapMonsterService
+		default:
+			log.Fatal("Invalid CAPTCHA service. Use '2captcha', 'deathbycaptcha', 'anticaptcha', or 'capmonster'")
+		}
+
+		captchaConfig := scraper.CaptchaSolverConfig{
+			Service:      service,
+			APIKey:       *captchaAPIKey,
+			Timeout:      *captchaTimeout,
+			PollInterval: *captchaPollInterval,
+			MaxRetries:   *captchaMaxRetries,
+			MinScore:     *captchaMinScore,
+			Language:     "en",
+		}
+
+		if *verbose {
+			log.Printf("CAPTCHA solving enabled with service: %s", *captchaService)
+			log.Printf("CAPTCHA timeout: %v, poll interval: %v", *captchaTimeout, *captchaPollInterval)
+		}
+
+		options = append(options, scraper.WithCaptchaDetection(captchaConfig))
 	}
 
 	// Parse HTTP version
@@ -131,13 +214,29 @@ func main() {
 
 	if *verbose {
 		log.Printf("HTTP Version: %s", *httpVersion)
+		if *enableJS {
+			log.Printf("JavaScript Engine: enabled")
+			log.Printf("JavaScript Mode: %s", *jsMode)
+		}
 	}
 
-	// Create scraper with options
-	s, err := scraper.NewAdvancedScraperWithProtocol(fingerprint, protocol, options...)
+	// Configure JavaScript engine if enabled
+	var jsConfig scraper.JSEngineConfig
+	if *enableJS {
+		jsConfig = createJSConfig()
+	}
+
+	// Create scraper with JavaScript support if enabled
+	var s *scraper.AdvancedScraper
+	if *enableJS {
+		s, err = scraper.NewAdvancedScraperWithJS(fingerprint, protocol, jsConfig, options...)
+	} else {
+		s, err = scraper.NewAdvancedScraperWithProtocol(fingerprint, protocol, options...)
+	}
 	if err != nil {
 		log.Fatal("Failed to create scraper:", err)
 	}
+	defer s.Close()
 
 	// Override user agent if provided
 	if *userAgent != "" {
@@ -186,6 +285,26 @@ func main() {
 
 	// Output results
 	outputResponse(response, *output, *showHeaders, *verbose)
+
+	// Show proxy metrics if requested
+	if *showProxyMetrics && (*proxies != "" || *enableProxyHealth) {
+		metrics := s.GetProxyMetrics()
+		fmt.Printf("\n=== Proxy Metrics ===\n")
+		if metricsJSON, err := json.MarshalIndent(metrics, "", "  "); err == nil {
+			fmt.Println(string(metricsJSON))
+		}
+
+		// Show detailed proxy health if available
+		if *verbose {
+			health := s.GetAllProxiesHealth()
+			if len(health) > 0 {
+				fmt.Printf("\n=== Proxy Health Details ===\n")
+				if healthJSON, err := json.MarshalIndent(health, "", "  "); err == nil {
+					fmt.Println(string(healthJSON))
+				}
+			}
+		}
+	}
 }
 
 func parseBrowserFingerprint(browser string) (scraper.Fingerprint, error) {
@@ -297,4 +416,38 @@ func outputText(response *scraper.Response, showHeaders, verbose bool) {
 	}
 
 	fmt.Println(response.Body)
+}
+
+// createJSConfig creates JavaScript engine configuration from CLI flags
+func createJSConfig() scraper.JSEngineConfig {
+	// Parse viewport
+	width, height := int64(1920), int64(1080)
+	if *viewport != "" {
+		if parts := strings.Split(*viewport, "x"); len(parts) == 2 {
+			if w, err := parseViewportDimension(parts[0]); err == nil {
+				width = w
+			}
+			if h, err := parseViewportDimension(parts[1]); err == nil {
+				height = h
+			}
+		}
+	}
+
+	return scraper.JSEngineConfig{
+		Enabled:  *enableJS,
+		Timeout:  *jsTimeout,
+		Headless: *headless,
+		NoImages: *noImages,
+		Viewport: scraper.Viewport{
+			Width:  width,
+			Height: height,
+		},
+	}
+}
+
+// parseViewportDimension parses a viewport dimension string to int64
+func parseViewportDimension(s string) (int64, error) {
+	var result int64
+	_, err := fmt.Sscanf(s, "%d", &result)
+	return result, err
 }

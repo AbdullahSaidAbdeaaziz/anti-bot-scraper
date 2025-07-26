@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,25 +21,32 @@ type ProxyRotationMode int
 const (
 	RotatePerRequest ProxyRotationMode = iota // Rotate on every request
 	RotateOnError                             // Rotate only on timeout/error/block
+	HealthAware                               // Use health monitoring for smart rotation
 )
 
-// ProxyRotator manages proxy rotation
+// ProxyRotator manages proxy rotation with health monitoring
 type ProxyRotator struct {
-	proxies     []string
-	current     int
-	mode        ProxyRotationMode
-	mutex       sync.RWMutex
-	failedCount map[string]int // Track failures per proxy
+	proxies       []string
+	current       int
+	mode          ProxyRotationMode
+	mutex         sync.RWMutex
+	failedCount   map[string]int      // Track failures per proxy (legacy)
+	healthChecker *ProxyHealthChecker // Health monitoring system
+	enableHealth  bool                // Whether health monitoring is enabled
+	maxRetries    int                 // Max retries for finding healthy proxy
 }
 
 // AdvancedScraper extends the basic scraper with additional features
 type AdvancedScraper struct {
 	*Scraper
-	cookieJar    *CookieJar
-	proxyURL     string        // Single proxy (deprecated, use proxyRotator)
-	proxyRotator *ProxyRotator // Multi-proxy rotation
-	retryCount   int
-	rateLimiter  *RateLimiter
+	cookieJar       *CookieJar
+	proxyURL        string              // Single proxy (deprecated, use proxyRotator)
+	proxyRotator    *ProxyRotator       // Multi-proxy rotation
+	healthChecker   *ProxyHealthChecker // Proxy health monitoring
+	captchaSolver   *CaptchaSolver      // CAPTCHA solving service
+	captchaDetector *CaptchaDetector    // CAPTCHA detection and handling
+	retryCount      int
+	rateLimiter     *RateLimiter
 }
 
 // CookieJar manages cookies for the scraper
@@ -60,7 +68,12 @@ func NewAdvancedScraper(fingerprint Fingerprint, options ...ScraperOption) (*Adv
 
 // NewAdvancedScraperWithProtocol creates a new advanced scraper with specified protocol
 func NewAdvancedScraperWithProtocol(fingerprint Fingerprint, protocol ProtocolVersion, options ...ScraperOption) (*AdvancedScraper, error) {
-	baseScraper, err := NewScraperWithProtocol(fingerprint, protocol)
+	return NewAdvancedScraperWithJS(fingerprint, protocol, JSEngineConfig{Enabled: false}, options...)
+}
+
+// NewAdvancedScraperWithJS creates a new advanced scraper with JavaScript engine support
+func NewAdvancedScraperWithJS(fingerprint Fingerprint, protocol ProtocolVersion, jsConfig JSEngineConfig, options ...ScraperOption) (*AdvancedScraper, error) {
+	baseScraper, err := NewScraperWithJS(fingerprint, protocol, jsConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -85,12 +98,56 @@ type ScraperOption func(*AdvancedScraper)
 
 // NewProxyRotator creates a new proxy rotator
 func NewProxyRotator(proxies []string, mode ProxyRotationMode) *ProxyRotator {
-	return &ProxyRotator{
+	rotator := &ProxyRotator{
 		proxies:     proxies,
 		current:     0,
 		mode:        mode,
 		failedCount: make(map[string]int),
+		maxRetries:  len(proxies) * 2, // Allow cycling through all proxies twice
 	}
+
+	// Enable health monitoring for HealthAware mode
+	if mode == HealthAware {
+		rotator.enableHealth = true
+		rotator.healthChecker = NewProxyHealthChecker(ProxyHealthConfig{
+			CheckInterval: 5 * time.Minute,
+			Timeout:       10 * time.Second,
+			TestURL:       "https://httpbin.org/ip",
+			MaxFailures:   3,
+		})
+
+		// Add all proxies to health monitoring
+		for _, proxy := range proxies {
+			rotator.healthChecker.AddProxy(proxy)
+		}
+
+		// Start health monitoring
+		rotator.healthChecker.Start()
+	}
+
+	return rotator
+}
+
+// NewProxyRotatorWithHealthChecker creates a proxy rotator with custom health checker
+func NewProxyRotatorWithHealthChecker(proxies []string, mode ProxyRotationMode, healthChecker *ProxyHealthChecker) *ProxyRotator {
+	rotator := &ProxyRotator{
+		proxies:       proxies,
+		current:       0,
+		mode:          mode,
+		failedCount:   make(map[string]int),
+		healthChecker: healthChecker,
+		enableHealth:  true,
+		maxRetries:    len(proxies) * 2,
+	}
+
+	// Add proxies to health checker
+	if healthChecker != nil {
+		for _, proxy := range proxies {
+			healthChecker.AddProxy(proxy)
+		}
+	}
+
+	return rotator
 }
 
 // GetNext returns the next proxy based on rotation mode
@@ -102,15 +159,61 @@ func (pr *ProxyRotator) GetNext() string {
 		return ""
 	}
 
-	if pr.mode == RotatePerRequest {
+	switch pr.mode {
+	case RotatePerRequest:
 		// Always rotate to next proxy
+		proxy := pr.proxies[pr.current]
+		pr.current = (pr.current + 1) % len(pr.proxies)
+		return proxy
+
+	case HealthAware:
+		// Use health monitoring to find best proxy
+		return pr.getHealthyProxy()
+
+	default: // RotateOnError
+		// Return current proxy
+		return pr.proxies[pr.current]
+	}
+}
+
+// getHealthyProxy finds the best healthy proxy using health monitoring
+func (pr *ProxyRotator) getHealthyProxy() string {
+	if !pr.enableHealth || pr.healthChecker == nil {
+		// Fallback to simple rotation
 		proxy := pr.proxies[pr.current]
 		pr.current = (pr.current + 1) % len(pr.proxies)
 		return proxy
 	}
 
-	// RotateOnError mode - return current proxy
-	return pr.proxies[pr.current]
+	// Get healthy proxies
+	healthyProxies := pr.healthChecker.GetHealthyProxies()
+
+	if len(healthyProxies) == 0 {
+		// No healthy proxies available, use any proxy
+		proxy := pr.proxies[pr.current]
+		pr.current = (pr.current + 1) % len(pr.proxies)
+		return proxy
+	}
+
+	// Find the best healthy proxy (lowest latency)
+	var bestProxy string
+	var bestLatency time.Duration = time.Hour // Start with very high value
+
+	for _, proxyURL := range healthyProxies {
+		if health, exists := pr.healthChecker.GetProxyHealth(proxyURL); exists {
+			if health.Latency < bestLatency {
+				bestLatency = health.Latency
+				bestProxy = proxyURL
+			}
+		}
+	}
+
+	if bestProxy == "" {
+		// Fallback to first healthy proxy
+		bestProxy = healthyProxies[0]
+	}
+
+	return bestProxy
 }
 
 // MarkFailed marks a proxy as failed and rotates to next if needed
@@ -118,10 +221,28 @@ func (pr *ProxyRotator) MarkFailed(proxyURL string) {
 	pr.mutex.Lock()
 	defer pr.mutex.Unlock()
 
+	// Legacy failure tracking
 	pr.failedCount[proxyURL]++
 
-	// Rotate to next proxy on failure
-	pr.current = (pr.current + 1) % len(pr.proxies)
+	// If health monitoring is enabled, let it handle the failure
+	if pr.enableHealth && pr.healthChecker != nil {
+		// Health checker will handle the failure internally
+		// We just need to trigger a health check
+		go pr.healthChecker.CheckProxyHealth(proxyURL)
+	}
+
+	// Rotate to next proxy on failure (for non-health-aware modes)
+	if pr.mode != HealthAware {
+		pr.current = (pr.current + 1) % len(pr.proxies)
+	}
+}
+
+// MarkSuccess marks a proxy as successful (for health monitoring)
+func (pr *ProxyRotator) MarkSuccess(proxyURL string, latency time.Duration) {
+	if pr.enableHealth && pr.healthChecker != nil {
+		// Record success in health monitoring
+		// This will be handled internally by the health checker
+	}
 }
 
 // GetFailureCount returns the failure count for a proxy
@@ -131,6 +252,82 @@ func (pr *ProxyRotator) GetFailureCount(proxyURL string) int {
 	return pr.failedCount[proxyURL]
 }
 
+// GetHealthyProxies returns all currently healthy proxies
+func (pr *ProxyRotator) GetHealthyProxies() []string {
+	if pr.enableHealth && pr.healthChecker != nil {
+		return pr.healthChecker.GetHealthyProxies()
+	}
+
+	// Fallback to all proxies if health monitoring is disabled
+	return pr.proxies
+}
+
+// GetProxyHealth returns detailed health information for a proxy
+func (pr *ProxyRotator) GetProxyHealth(proxyURL string) (*ProxyHealth, bool) {
+	if pr.enableHealth && pr.healthChecker != nil {
+		return pr.healthChecker.GetProxyHealth(proxyURL)
+	}
+	return nil, false
+}
+
+// GetAllProxiesHealth returns health status of all proxies
+func (pr *ProxyRotator) GetAllProxiesHealth() map[string]*ProxyHealth {
+	if pr.enableHealth && pr.healthChecker != nil {
+		return pr.healthChecker.GetAllProxiesHealth()
+	}
+	return make(map[string]*ProxyHealth)
+}
+
+// GetProxyMetrics returns overall proxy pool metrics
+func (pr *ProxyRotator) GetProxyMetrics() map[string]interface{} {
+	if pr.enableHealth && pr.healthChecker != nil {
+		return pr.healthChecker.GetProxyMetrics()
+	}
+
+	// Basic metrics without health monitoring
+	return map[string]interface{}{
+		"total_proxies":  len(pr.proxies),
+		"current_proxy":  pr.current,
+		"health_enabled": false,
+	}
+}
+
+// EnableHealthMonitoring enables health monitoring for existing rotator
+func (pr *ProxyRotator) EnableHealthMonitoring(config ProxyHealthConfig) {
+	pr.mutex.Lock()
+	defer pr.mutex.Unlock()
+
+	if !pr.enableHealth {
+		pr.enableHealth = true
+		pr.healthChecker = NewProxyHealthChecker(config)
+
+		// Add all proxies to health monitoring
+		for _, proxy := range pr.proxies {
+			pr.healthChecker.AddProxy(proxy)
+		}
+
+		// Start health monitoring
+		pr.healthChecker.Start()
+	}
+}
+
+// DisableHealthMonitoring disables health monitoring
+func (pr *ProxyRotator) DisableHealthMonitoring() {
+	pr.mutex.Lock()
+	defer pr.mutex.Unlock()
+
+	if pr.enableHealth && pr.healthChecker != nil {
+		pr.healthChecker.Stop()
+		pr.healthChecker = nil
+		pr.enableHealth = false
+	}
+}
+
+// Stop stops the proxy rotator and health monitoring
+func (pr *ProxyRotator) Stop() {
+	pr.DisableHealthMonitoring()
+}
+
 // WithProxyRotation sets up proxy rotation for the scraper
 func WithProxyRotation(proxies []string, mode ProxyRotationMode) ScraperOption {
 	return func(s *AdvancedScraper) {
@@ -138,7 +335,50 @@ func WithProxyRotation(proxies []string, mode ProxyRotationMode) ScraperOption {
 	}
 }
 
-// WithProxy sets a proxy for the scraper
+// WithHealthAwareProxyRotation sets up health-aware proxy rotation
+func WithHealthAwareProxyRotation(proxies []string, healthConfig ProxyHealthConfig) ScraperOption {
+	return func(s *AdvancedScraper) {
+		s.proxyRotator = NewProxyRotator(proxies, HealthAware)
+		s.healthChecker = NewProxyHealthChecker(healthConfig)
+
+		// Configure the rotator to use our health checker
+		s.proxyRotator.healthChecker = s.healthChecker
+		s.proxyRotator.enableHealth = true
+
+		// Add proxies and start monitoring
+		for _, proxy := range proxies {
+			s.healthChecker.AddProxy(proxy)
+		}
+		s.healthChecker.Start()
+	}
+}
+
+// WithProxyHealthMonitoring adds health monitoring to existing proxy setup
+func WithProxyHealthMonitoring(config ProxyHealthConfig) ScraperOption {
+	return func(s *AdvancedScraper) {
+		s.healthChecker = NewProxyHealthChecker(config)
+
+		// If we have a proxy rotator, enable health monitoring on it
+		if s.proxyRotator != nil {
+			s.proxyRotator.EnableHealthMonitoring(config)
+		}
+	}
+}
+
+// WithCaptchaSolver adds CAPTCHA solving capability
+func WithCaptchaSolver(config CaptchaSolverConfig) ScraperOption {
+	return func(s *AdvancedScraper) {
+		s.captchaSolver = NewCaptchaSolver(config)
+	}
+}
+
+// WithCaptchaDetection enables automatic CAPTCHA detection and solving
+func WithCaptchaDetection(solverConfig CaptchaSolverConfig) ScraperOption {
+	return func(s *AdvancedScraper) {
+		s.captchaSolver = NewCaptchaSolver(solverConfig)
+		// CAPTCHA detector will be initialized when JS engine is available
+	}
+} // WithProxy sets a proxy for the scraper
 func WithProxy(proxyURL string) ScraperOption {
 	return func(s *AdvancedScraper) {
 		s.proxyURL = proxyURL
@@ -391,4 +631,143 @@ func (a *AdvancedScraper) addCookies(req *http.Request, targetURL string) {
 			req.AddCookie(cookie)
 		}
 	}
+}
+
+// GetProxyHealth returns health information for a specific proxy
+func (a *AdvancedScraper) GetProxyHealth(proxyURL string) (*ProxyHealth, bool) {
+	if a.healthChecker != nil {
+		return a.healthChecker.GetProxyHealth(proxyURL)
+	}
+	if a.proxyRotator != nil {
+		return a.proxyRotator.GetProxyHealth(proxyURL)
+	}
+	return nil, false
+}
+
+// GetAllProxiesHealth returns health status of all proxies
+func (a *AdvancedScraper) GetAllProxiesHealth() map[string]*ProxyHealth {
+	if a.healthChecker != nil {
+		return a.healthChecker.GetAllProxiesHealth()
+	}
+	if a.proxyRotator != nil {
+		return a.proxyRotator.GetAllProxiesHealth()
+	}
+	return make(map[string]*ProxyHealth)
+}
+
+// GetProxyMetrics returns comprehensive proxy pool metrics
+func (a *AdvancedScraper) GetProxyMetrics() map[string]interface{} {
+	if a.healthChecker != nil {
+		return a.healthChecker.GetProxyMetrics()
+	}
+	if a.proxyRotator != nil {
+		return a.proxyRotator.GetProxyMetrics()
+	}
+	return map[string]interface{}{
+		"proxy_rotation":    false,
+		"health_monitoring": false,
+	}
+}
+
+// GetHealthyProxies returns list of currently healthy proxies
+func (a *AdvancedScraper) GetHealthyProxies() []string {
+	if a.healthChecker != nil {
+		return a.healthChecker.GetHealthyProxies()
+	}
+	if a.proxyRotator != nil {
+		return a.proxyRotator.GetHealthyProxies()
+	}
+	return []string{}
+}
+
+// EnableProxy manually enables a disabled proxy
+func (a *AdvancedScraper) EnableProxy(proxyURL string) {
+	if a.healthChecker != nil {
+		a.healthChecker.EnableProxy(proxyURL)
+	}
+}
+
+// DisableProxy manually disables a proxy
+func (a *AdvancedScraper) DisableProxy(proxyURL string) {
+	if a.healthChecker != nil {
+		a.healthChecker.DisableProxy(proxyURL)
+	}
+}
+
+// CheckProxyHealth manually triggers a health check for a specific proxy
+func (a *AdvancedScraper) CheckProxyHealth(proxyURL string) error {
+	if a.healthChecker != nil {
+		return a.healthChecker.CheckProxyHealth(proxyURL)
+	}
+	return fmt.Errorf("health monitoring not enabled")
+}
+
+// Stop gracefully stops the scraper and health monitoring
+func (a *AdvancedScraper) Stop() {
+	if a.proxyRotator != nil {
+		a.proxyRotator.Stop()
+	}
+	if a.healthChecker != nil {
+		a.healthChecker.Stop()
+	}
+}
+
+// DetectAndSolveCaptcha detects and solves CAPTCHAs on the current page
+func (a *AdvancedScraper) DetectAndSolveCaptcha(ctx context.Context, pageURL string) (*CaptchaDetectionResult, error) {
+	if a.captchaDetector == nil {
+		return &CaptchaDetectionResult{Found: false, PageURL: pageURL}, nil
+	}
+	return a.captchaDetector.DetectCaptcha(ctx, pageURL)
+}
+
+// SetCaptchaSolver sets or updates the CAPTCHA solver
+func (a *AdvancedScraper) SetCaptchaSolver(solver *CaptchaSolver) {
+	a.captchaSolver = solver
+	if a.captchaDetector != nil {
+		a.captchaDetector.SetSolver(solver)
+	}
+}
+
+// EnableCaptchaDetection enables CAPTCHA detection (requires JS engine)
+func (a *AdvancedScraper) EnableCaptchaDetection() error {
+	if a.captchaSolver == nil {
+		return fmt.Errorf("CAPTCHA solver not configured")
+	}
+
+	// Get JS engine from the scraper
+	jsEngine := a.getJSEngine()
+	if jsEngine == nil {
+		return fmt.Errorf("JavaScript engine required for CAPTCHA detection")
+	}
+
+	a.captchaDetector = NewCaptchaDetector(a.captchaSolver, jsEngine)
+	return nil
+}
+
+// DisableCaptchaDetection disables CAPTCHA detection
+func (a *AdvancedScraper) DisableCaptchaDetection() {
+	if a.captchaDetector != nil {
+		a.captchaDetector.Disable()
+	}
+}
+
+// GetCaptchaSolverBalance returns the balance of the CAPTCHA solving service
+func (a *AdvancedScraper) GetCaptchaSolverBalance(ctx context.Context) (float64, error) {
+	if a.captchaSolver == nil {
+		return 0, fmt.Errorf("CAPTCHA solver not configured")
+	}
+	return a.captchaSolver.GetBalance(ctx)
+}
+
+// IsCaptchaDetectionEnabled returns whether CAPTCHA detection is enabled
+func (a *AdvancedScraper) IsCaptchaDetectionEnabled() bool {
+	return a.captchaDetector != nil && a.captchaDetector.IsEnabled()
+}
+
+// getJSEngine attempts to get the JavaScript engine from the scraper
+func (a *AdvancedScraper) getJSEngine() *JSEngine {
+	// This is a simplified approach - in a real implementation,
+	// we'd need to access the JS engine from the scraper properly
+	// For now, return nil if not available
+	return nil
 }

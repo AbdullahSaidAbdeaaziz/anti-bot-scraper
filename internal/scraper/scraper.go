@@ -39,6 +39,8 @@ type Scraper struct {
 	userAgent   string
 	headers     map[string]string
 	protocol    ProtocolVersion
+	jsEngine    *JSEngine      // JavaScript engine for dynamic content
+	jsConfig    JSEngineConfig // JS engine configuration
 }
 
 // Response represents an HTTP response
@@ -47,6 +49,9 @@ type Response struct {
 	Headers    map[string][]string
 	Body       string
 	URL        string
+	JSEnabled  bool     // Whether JavaScript was used
+	Console    []string // Console messages from JS execution
+	JSErrors   []string // JavaScript errors if any
 }
 
 // NewScraper creates a new scraper instance with the specified fingerprint (HTTP/1.1 for compatibility)
@@ -56,9 +61,28 @@ func NewScraper(fingerprint Fingerprint) (*Scraper, error) {
 
 // NewScraperWithProtocol creates a new scraper with specified protocol version
 func NewScraperWithProtocol(fingerprint Fingerprint, protocol ProtocolVersion) (*Scraper, error) {
+	return NewScraperWithJS(fingerprint, protocol, JSEngineConfig{Enabled: false})
+}
+
+// NewScraperWithJS creates a new scraper with JavaScript engine support
+func NewScraperWithJS(fingerprint Fingerprint, protocol ProtocolVersion, jsConfig JSEngineConfig) (*Scraper, error) {
 	client, err := createTLSClientWithProtocol(fingerprint, protocol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TLS client: %w", err)
+	}
+
+	// Initialize JavaScript engine if enabled
+	var jsEngine *JSEngine
+	if jsConfig.Enabled {
+		// Set browser-specific user agent for JS engine
+		if jsConfig.UserAgent == "" {
+			jsConfig.UserAgent = getUserAgent(fingerprint)
+		}
+
+		jsEngine, err = NewJSEngine(jsConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create JavaScript engine: %w", err)
+		}
 	}
 
 	scraper := &Scraper{
@@ -67,6 +91,8 @@ func NewScraperWithProtocol(fingerprint Fingerprint, protocol ProtocolVersion) (
 		userAgent:   getUserAgent(fingerprint),
 		headers:     getDefaultHeaders(fingerprint),
 		protocol:    protocol,
+		jsEngine:    jsEngine,
+		jsConfig:    jsConfig,
 	}
 
 	return scraper, nil
@@ -103,7 +129,115 @@ func (s *Scraper) Get(url string) (*Response, error) {
 		Headers:    resp.Header,
 		Body:       string(body),
 		URL:        url,
+		JSEnabled:  false,
+		Console:    []string{},
+		JSErrors:   []string{},
 	}, nil
+}
+
+// GetWithJS performs a GET request with JavaScript execution enabled
+func (s *Scraper) GetWithJS(url string) (*Response, error) {
+	if s.jsEngine == nil {
+		return nil, fmt.Errorf("JavaScript engine not initialized - use NewScraperWithJS")
+	}
+
+	jsResp, err := s.jsEngine.Scrape(url, s.jsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("JavaScript scraping failed: %w", err)
+	}
+
+	return &Response{
+		StatusCode: jsResp.StatusCode,
+		Headers:    convertMapToHeader(jsResp.Headers),
+		Body:       jsResp.HTML,
+		URL:        jsResp.URL,
+		JSEnabled:  true,
+		Console:    jsResp.Console,
+		JSErrors:   jsResp.Errors,
+	}, nil
+}
+
+// GetWithBehavior performs a GET request with human-like behavior simulation
+func (s *Scraper) GetWithBehavior(url string) (*Response, error) {
+	if s.jsEngine == nil {
+		return nil, fmt.Errorf("JavaScript engine not initialized - use NewScraperWithJS")
+	}
+
+	jsResp, err := s.jsEngine.SimulateHumanBehavior(url, s.jsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("human behavior simulation failed: %w", err)
+	}
+
+	return &Response{
+		StatusCode: jsResp.StatusCode,
+		Headers:    convertMapToHeader(jsResp.Headers),
+		Body:       jsResp.HTML,
+		URL:        jsResp.URL,
+		JSEnabled:  true,
+		Console:    jsResp.Console,
+		JSErrors:   jsResp.Errors,
+	}, nil
+}
+
+// WaitForElement waits for a specific element to appear before returning the page
+func (s *Scraper) WaitForElement(url string, selector string) (*Response, error) {
+	if s.jsEngine == nil {
+		return nil, fmt.Errorf("JavaScript engine not initialized - use NewScraperWithJS")
+	}
+
+	jsResp, err := s.jsEngine.WaitForElement(url, selector, s.jsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("waiting for element failed: %w", err)
+	}
+
+	return &Response{
+		StatusCode: jsResp.StatusCode,
+		Headers:    convertMapToHeader(jsResp.Headers),
+		Body:       jsResp.HTML,
+		URL:        jsResp.URL,
+		JSEnabled:  true,
+		Console:    jsResp.Console,
+		JSErrors:   jsResp.Errors,
+	}, nil
+}
+
+// ExecuteJS executes custom JavaScript code and returns the result
+func (s *Scraper) ExecuteJS(url string, jsCode string) (*Response, error) {
+	if s.jsEngine == nil {
+		return nil, fmt.Errorf("JavaScript engine not initialized - use NewScraperWithJS")
+	}
+
+	jsResp, err := s.jsEngine.ExecuteJS(url, jsCode, s.jsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("JavaScript execution failed: %w", err)
+	}
+
+	return &Response{
+		StatusCode: jsResp.StatusCode,
+		Headers:    convertMapToHeader(jsResp.Headers),
+		Body:       jsResp.HTML,
+		URL:        jsResp.URL,
+		JSEnabled:  true,
+		Console:    jsResp.Console,
+		JSErrors:   jsResp.Errors,
+	}, nil
+}
+
+// Close cleans up the scraper resources
+func (s *Scraper) Close() error {
+	if s.jsEngine != nil {
+		return s.jsEngine.Close()
+	}
+	return nil
+}
+
+// convertMapToHeader converts a map[string]string to http.Header
+func convertMapToHeader(headers map[string]string) map[string][]string {
+	result := make(map[string][]string)
+	for key, value := range headers {
+		result[key] = []string{value}
+	}
+	return result
 }
 
 // createTLSClient creates an HTTP client with the specified TLS fingerprint (HTTP/1.1 only)

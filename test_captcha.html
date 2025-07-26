@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CAPTCHA Test Page</title>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+</head>
+<body>
+    <h1>CAPTCHA Test Page</h1>
+    <p>This page contains a reCAPTCHA v2 for testing.</p>
+    
+    <form action="/submit" method="post">
+        <div class="g-recaptcha" data-sitekey="6LdyC2cUAAAAAB5QSUwPvJx6Jl4GUpQX2-SYSr_L"></div>
+        <input type="submit" value="Submit">
+    </form>
+    
+    <!-- Test image CAPTCHA -->
+    <div class="captcha-container">
+        <h3>Image CAPTCHA</h3>
+        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" class="captcha-image">
+        <input type="text" name="captcha_solution" placeholder="Enter CAPTCHA">
+    </div>
+    
+    <!-- Test hCaptcha -->
+    <div class="h-captcha" data-sitekey="10000000-ffff-ffff-ffff-000000000001"></div>
+</body>
+</html>
