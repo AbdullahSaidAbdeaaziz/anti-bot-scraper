@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"strings"
 	"time"
@@ -13,8 +14,18 @@ import (
 )
 
 var (
-	// Command line flags
-	url           = flag.String("url", "", "URL to scrape (required)")
+	// Core Input Configuration Flags
+	url            = flag.String("url", "", "Single URL to scrape (required if urls-file not specified)")
+	urlsFile       = flag.String("urls-file", "", "File containing multiple URLs to scrape (one per line)")
+	numRequests    = flag.Int("num-requests", 1, "Number of requests to send per URL")
+	proxyFile      = flag.String("proxy-file", "", "File containing proxy list (one per line)")
+	tlsProfile     = flag.String("tls-profile", "chrome", "TLS profile for fingerprinting (chrome, firefox, safari, edge)")
+	tlsRandomize   = flag.Bool("tls-randomize", false, "Randomize TLS profiles across requests")
+	delayMin       = flag.Duration("delay-min", 1*time.Second, "Minimum delay between requests")
+	delayMax       = flag.Duration("delay-max", 3*time.Second, "Maximum delay between requests")
+	delayRandomize = flag.Bool("delay-randomize", true, "Randomize delays within the specified range")
+
+	// Existing flags
 	browser       = flag.String("browser", "chrome", "Browser fingerprint (chrome, firefox, safari, edge)")
 	method        = flag.String("method", "GET", "HTTP method (GET, POST)")
 	headers       = flag.String("headers", "", "Custom headers in JSON format or @filename to read from file")
@@ -25,6 +36,23 @@ var (
 	proxy         = flag.String("proxy", "", "Single proxy URL (http://proxy:port or socks5://proxy:port)")
 	proxies       = flag.String("proxies", "", "Multiple proxies separated by comma for rotation")
 	proxyRotation = flag.String("proxy-rotation", "per-request", "Proxy rotation mode: 'per-request', 'on-error', or 'health-aware'")
+
+	// Enhanced Header Mimicry Flags
+	headerMimicry    = flag.Bool("header-mimicry", true, "Enable browser-consistent header mimicry")
+	customUserAgent  = flag.String("custom-user-agent", "", "Custom User-Agent (overrides browser default)")
+	headerProfile    = flag.String("header-profile", "auto", "Header profile: 'auto' (match TLS), 'chrome', 'firefox', 'safari', 'edge'")
+	enableSecHeaders = flag.Bool("enable-sec-headers", true, "Include security headers (Sec-CH-UA, Sec-Fetch-*)")
+	acceptLanguage   = flag.String("accept-language", "auto", "Accept-Language header value ('auto' for browser default)")
+	acceptEncoding   = flag.String("accept-encoding", "auto", "Accept-Encoding header value ('auto' for browser default)")
+
+	// Cookie & Redirect Handling Flags
+	cookieJar         = flag.Bool("cookie-jar", true, "Enable in-memory cookie jar")
+	cookiePersistence = flag.String("cookie-persistence", "session", "Cookie persistence: 'session', 'proxy', 'none'")
+	followRedirects   = flag.Bool("follow-redirects", true, "Follow HTTP redirects (302, 301, etc.)")
+	maxRedirects      = flag.Int("max-redirects", 10, "Maximum number of redirects to follow")
+	redirectTimeout   = flag.Duration("redirect-timeout", 30*time.Second, "Timeout for redirect chains")
+	cookieFile        = flag.String("cookie-file", "", "File to save/load cookies for persistence")
+	clearCookies      = flag.Bool("clear-cookies", false, "Clear cookies before each request")
 	// Proxy Health Monitoring Flags
 	enableProxyHealth   = flag.Bool("enable-proxy-health", false, "Enable proxy health monitoring")
 	proxyHealthInterval = flag.Duration("proxy-health-interval", 5*time.Minute, "Proxy health check interval")
@@ -110,162 +138,232 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *url == "" {
-		fmt.Fprintf(os.Stderr, "Error: URL is required\n\n")
+	// Validate input configuration
+	if *url == "" && *urlsFile == "" {
+		fmt.Fprintf(os.Stderr, "Error: Either -url or -urls-file is required\n\n")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	if *verbose {
-		log.Printf("Starting %s v%s", appName, appVersion)
-		log.Printf("Target URL: %s", *url)
-		log.Printf("Browser: %s", *browser)
-		log.Printf("Method: %s", *method)
+	if *url != "" && *urlsFile != "" {
+		fmt.Fprintf(os.Stderr, "Error: Cannot specify both -url and -urls-file\n\n")
+		flag.Usage()
+		os.Exit(1)
 	}
 
-	// Parse browser fingerprint
-	fingerprint, err := parseBrowserFingerprint(*browser)
-	if err != nil {
-		log.Fatal("Error:", err)
+	// Prepare list of URLs to process
+	var urls []string
+	if *url != "" {
+		urls = []string{*url}
+	} else {
+		var err error
+		urls, err = loadURLsFromFile(*urlsFile)
+		if err != nil {
+			log.Fatal("Failed to load URLs from file:", err)
+		}
 	}
+
+	if len(urls) == 0 {
+		log.Fatal("No URLs to process")
+	}
+
+	if *verbose {
+		log.Printf("Starting %s v%s", appName, appVersion)
+		log.Printf("URLs to process: %d", len(urls))
+		log.Printf("Requests per URL: %d", *numRequests)
+		log.Printf("Browser: %s", *browser)
+		log.Printf("Method: %s", *method)
+		if *tlsRandomize {
+			log.Printf("TLS Profile: randomized across requests")
+		} else {
+			log.Printf("TLS Profile: %s", *tlsProfile)
+		}
+		if *delayRandomize {
+			log.Printf("Request delays: randomized between %v and %v", *delayMin, *delayMax)
+		} else {
+			log.Printf("Request delay: %v", *delayMin)
+		}
+	}
+
+	// Load proxy list if specified
+	var proxyList []string
+	if *proxyFile != "" {
+		var err error
+		proxyList, err = loadProxiesFromFile(*proxyFile)
+		if err != nil {
+			log.Fatal("Failed to load proxies from file:", err)
+		}
+		if *verbose {
+			log.Printf("Loaded %d proxies from file", len(proxyList))
+		}
+	} else if *proxies != "" {
+		proxyList = strings.Split(*proxies, ",")
+		for i, p := range proxyList {
+			proxyList[i] = strings.TrimSpace(p)
+		}
+	}
+
+	// Execute requests for all URLs
+	for urlIndex, targetURL := range urls {
+		if len(urls) > 1 && *verbose {
+			log.Printf("Processing URL %d/%d: %s", urlIndex+1, len(urls), targetURL)
+		}
+
+		// Execute multiple requests per URL if specified
+		for reqIndex := 0; reqIndex < *numRequests; reqIndex++ {
+			if *numRequests > 1 && *verbose {
+				log.Printf("Request %d/%d for URL: %s", reqIndex+1, *numRequests, targetURL)
+			}
+
+			err := executeRequest(targetURL, reqIndex, urlIndex, proxyList)
+			if err != nil {
+				log.Printf("Request failed for %s (attempt %d): %v", targetURL, reqIndex+1, err)
+				continue
+			}
+
+			// Apply delay between requests (except for the last request)
+			if reqIndex < *numRequests-1 || urlIndex < len(urls)-1 {
+				delay := calculateDelay()
+				if *verbose {
+					log.Printf("Waiting %v before next request", delay)
+				}
+				time.Sleep(delay)
+			}
+		}
+	}
+}
+
+func loadURLsFromFile(filename string) ([]string, error) {
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read URLs file %s: %w", filename, err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	var urls []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			urls = append(urls, line)
+		}
+	}
+
+	return urls, nil
+}
+
+func loadProxiesFromFile(filename string) ([]string, error) {
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read proxy file %s: %w", filename, err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	var proxies []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			proxies = append(proxies, line)
+		}
+	}
+
+	return proxies, nil
+}
+
+func calculateDelay() time.Duration {
+	if !*delayRandomize {
+		return *delayMin
+	}
+
+	if *delayMin >= *delayMax {
+		return *delayMin
+	}
+
+	minNanos := delayMin.Nanoseconds()
+	maxNanos := delayMax.Nanoseconds()
+	randomNanos := minNanos + rand.Int63n(maxNanos-minNanos)
+	return time.Duration(randomNanos)
+}
+
+func selectTLSProfile() scraper.Fingerprint {
+	if !*tlsRandomize {
+		fingerprint, _ := parseBrowserFingerprint(*tlsProfile)
+		return fingerprint
+	}
+
+	profiles := []string{"chrome", "firefox", "safari", "edge"}
+	randomProfile := profiles[rand.Intn(len(profiles))]
+	fingerprint, _ := parseBrowserFingerprint(randomProfile)
+	return fingerprint
+}
+
+func executeRequest(targetURL string, reqIndex, urlIndex int, proxyList []string) error {
+	// Select TLS fingerprint (randomized or fixed)
+	fingerprint := selectTLSProfile()
 
 	// Create scraper options
 	options := []scraper.ScraperOption{
 		scraper.WithRetryCount(*retries),
 		scraper.WithRateLimit(*rateLimit),
+		scraper.WithTimeout(*timeout),
 	}
 
-	// Add proxy configuration
-	if *proxies != "" {
-		// Multiple proxies for rotation
-		proxyList := strings.Split(*proxies, ",")
-		for i, p := range proxyList {
-			proxyList[i] = strings.TrimSpace(p)
-		}
-
-		var rotationMode scraper.ProxyRotationMode
-		switch *proxyRotation {
-		case "per-request":
-			rotationMode = scraper.RotatePerRequest
-		case "on-error":
-			rotationMode = scraper.RotateOnError
-		case "health-aware":
-			rotationMode = scraper.HealthAware
-		default:
-			log.Fatal("Invalid proxy rotation mode. Use 'per-request', 'on-error', or 'health-aware'")
-		}
-
-		if *verbose {
-			log.Printf("Using proxy rotation with %d proxies, mode: %s", len(proxyList), *proxyRotation)
-		}
-
-		// Use health-aware proxy rotation if requested or health monitoring is enabled
-		if rotationMode == scraper.HealthAware || *enableProxyHealth {
-			healthConfig := scraper.ProxyHealthConfig{
-				CheckInterval: *proxyHealthInterval,
-				Timeout:       *proxyHealthTimeout,
-				TestURL:       *proxyHealthTestURL,
-				MaxFailures:   *proxyMaxFailures,
-			}
-
-			if *verbose {
-				log.Printf("Enabling proxy health monitoring with %d proxies", len(proxyList))
-				log.Printf("Health check interval: %v, timeout: %v", *proxyHealthInterval, *proxyHealthTimeout)
-			}
-
-			options = append(options, scraper.WithHealthAwareProxyRotation(proxyList, healthConfig))
+	// Add enhanced header mimicry configuration
+	if *headerMimicry {
+		var headerProfileType scraper.Fingerprint
+		if *headerProfile == "auto" {
+			headerProfileType = fingerprint // Match TLS profile
 		} else {
-			options = append(options, scraper.WithProxyRotation(proxyList, rotationMode))
-		}
-
-	} else if *proxy != "" {
-		// Single proxy
-		if *verbose {
-			log.Printf("Using single proxy: %s", *proxy)
-		}
-		options = append(options, scraper.WithProxy(*proxy))
-	}
-
-	// Add CAPTCHA configuration
-	if *enableCaptcha {
-		if *captchaAPIKey == "" {
-			log.Fatal("CAPTCHA API key is required when CAPTCHA solving is enabled")
-		}
-
-		var service scraper.CaptchaService
-		switch *captchaService {
-		case "2captcha":
-			service = scraper.TwoCaptchaService
-		case "deathbycaptcha":
-			service = scraper.DeathByCaptchaService
-		case "anticaptcha":
-			service = scraper.AntiCaptchaService
-		case "capmonster":
-			service = scraper.CapMonsterService
-		default:
-			log.Fatal("Invalid CAPTCHA service. Use '2captcha', 'deathbycaptcha', 'anticaptcha', or 'capmonster'")
-		}
-
-		captchaConfig := scraper.CaptchaSolverConfig{
-			Service:      service,
-			APIKey:       *captchaAPIKey,
-			Timeout:      *captchaTimeout,
-			PollInterval: *captchaPollInterval,
-			MaxRetries:   *captchaMaxRetries,
-			MinScore:     *captchaMinScore,
-			Language:     "en",
-		}
-
-		if *verbose {
-			log.Printf("CAPTCHA solving enabled with service: %s", *captchaService)
-			log.Printf("CAPTCHA timeout: %v, poll interval: %v", *captchaTimeout, *captchaPollInterval)
-		}
-
-		options = append(options, scraper.WithCaptchaDetection(captchaConfig))
-	}
-
-	// Add Human Behavior Simulation configuration
-	if *enableBehavior {
-		var behaviorTypeEnum scraper.BehaviorType
-		switch *behaviorType {
-		case "normal":
-			behaviorTypeEnum = scraper.NormalBehavior
-		case "cautious":
-			behaviorTypeEnum = scraper.CautiousBehavior
-		case "aggressive":
-			behaviorTypeEnum = scraper.AggressiveBehavior
-		case "random":
-			behaviorTypeEnum = scraper.RandomBehavior
-		default:
-			log.Fatal("Invalid behavior type. Use 'normal', 'cautious', 'aggressive', or 'random'")
-		}
-
-		behaviorConfig := scraper.HumanBehaviorConfig{
-			Enabled:             true,
-			BehaviorType:        behaviorTypeEnum,
-			MinDelay:            *behaviorMinDelay,
-			MaxDelay:            *behaviorMaxDelay,
-			MouseMovement:       *enableMouseMove,
-			ScrollSimulation:    *enableScrollSim,
-			TypingDelay:         *enableTypingDelay,
-			PageLoadWait:        true,
-			RandomScrolling:     *enableRandomActivity,
-			RandomClicks:        *enableRandomActivity,
-			ViewportVariation:   true,
-			TabSwitchSimulation: false,
-		}
-
-		if *verbose || *showBehaviorInfo {
-			log.Printf("Human behavior simulation enabled with type: %s", *behaviorType)
-			log.Printf("Behavior delays: min=%v, max=%v", *behaviorMinDelay, *behaviorMaxDelay)
-			log.Printf("Mouse movement: %v, Scroll simulation: %v, Typing delay: %v",
-				*enableMouseMove, *enableScrollSim, *enableTypingDelay)
-			if *enableRandomActivity {
-				log.Printf("Random activity simulation enabled")
+			var err error
+			headerProfileType, err = parseBrowserFingerprint(*headerProfile)
+			if err != nil {
+				return fmt.Errorf("invalid header profile: %w", err)
 			}
 		}
 
-		options = append(options, scraper.WithHumanBehavior(behaviorConfig))
+		headerConfig := scraper.HeaderMimicryConfig{
+			Profile:           headerProfileType,
+			IncludeSecHeaders: *enableSecHeaders,
+			AcceptLanguage:    *acceptLanguage,
+			AcceptEncoding:    *acceptEncoding,
+			CustomUserAgent:   *customUserAgent,
+		}
+
+		options = append(options, scraper.WithHeaderMimicry(headerConfig))
+
+		if *verbose {
+			log.Printf("Header mimicry enabled for profile: %s", getProfileName(headerProfileType))
+		}
+	}
+
+	// Add cookie and redirect configuration
+	cookieConfig := scraper.CookieConfig{
+		EnableJar:      *cookieJar,
+		Persistence:    parseCookiePersistence(*cookiePersistence),
+		ClearOnRequest: *clearCookies,
+		CookieFile:     *cookieFile,
+	}
+
+	redirectConfig := scraper.RedirectConfig{
+		FollowRedirects: *followRedirects,
+		MaxRedirects:    *maxRedirects,
+		Timeout:         *redirectTimeout,
+	}
+
+	options = append(options, scraper.WithCookieHandling(cookieConfig))
+	options = append(options, scraper.WithRedirectHandling(redirectConfig))
+
+	// Add proxy configuration if specified
+	if len(proxyList) > 0 {
+		// Select proxy for this request (round-robin or random)
+		selectedProxy := selectProxy(proxyList, reqIndex, urlIndex)
+
+		if *verbose {
+			log.Printf("Using proxy: %s", selectedProxy)
+		}
+
+		options = append(options, scraper.WithProxy(selectedProxy))
+	} else if *proxy != "" {
+		options = append(options, scraper.WithProxy(*proxy))
 	}
 
 	// Parse HTTP version
@@ -278,108 +376,107 @@ func main() {
 	case "auto":
 		protocol = scraper.HTTPAuto
 	default:
-		log.Fatal("Invalid HTTP version. Use '1.1', '2', or 'auto'")
+		return fmt.Errorf("invalid HTTP version: %s", *httpVersion)
 	}
 
-	if *verbose {
-		log.Printf("HTTP Version: %s", *httpVersion)
-		if *enableJS {
-			log.Printf("JavaScript Engine: enabled")
-			log.Printf("JavaScript Mode: %s", *jsMode)
-		}
-	}
-
-	// Configure JavaScript engine if enabled
-	var jsConfig scraper.JSEngineConfig
-	if *enableJS {
-		jsConfig = createJSConfig()
-	}
-
-	// Create scraper with JavaScript support if enabled
-	var s *scraper.AdvancedScraper
-	if *enableJS {
-		s, err = scraper.NewAdvancedScraperWithJS(fingerprint, protocol, jsConfig, options...)
-	} else {
-		s, err = scraper.NewAdvancedScraperWithProtocol(fingerprint, protocol, options...)
-	}
+	// Create scraper
+	s, err := scraper.NewAdvancedScraperWithProtocol(fingerprint, protocol, options...)
 	if err != nil {
-		log.Fatal("Failed to create scraper:", err)
+		return fmt.Errorf("failed to create scraper: %w", err)
 	}
 	defer s.Close()
 
 	// Override user agent if provided
-	if *userAgent != "" {
-		s.SetUserAgent(*userAgent)
+	if *customUserAgent != "" {
+		s.SetUserAgent(*customUserAgent)
 	}
 
 	// Add custom headers if provided
 	if *headers != "" {
 		customHeaders, err := parseHeaders(*headers)
 		if err != nil {
-			log.Fatal("Failed to parse headers:", err)
+			return fmt.Errorf("failed to parse headers: %w", err)
 		}
 		for key, value := range customHeaders {
 			s.SetHeader(key, value)
 		}
 	}
 
-	// Handle concurrent requests if enabled
-	if *enableConcurrent {
-		handleConcurrentRequests(s)
-		return
-	}
-
-	var response *scraper.Response
-
 	// Execute request based on method
+	var response *scraper.Response
 	switch strings.ToUpper(*method) {
 	case "GET":
 		if *verbose {
-			log.Printf("Making GET request to %s", *url)
+			log.Printf("Making GET request to %s", targetURL)
 		}
-		response, err = s.GetWithRetry(*url)
+		response, err = s.GetWithRetry(targetURL)
 	case "POST":
 		if *data == "" {
-			log.Fatal("POST data is required for POST requests")
+			return fmt.Errorf("POST data is required for POST requests")
 		}
 		postData, err := parsePostData(*data)
 		if err != nil {
-			log.Fatal("Failed to parse POST data:", err)
+			return fmt.Errorf("failed to parse POST data: %w", err)
 		}
 		if *verbose {
-			log.Printf("Making POST request to %s", *url)
+			log.Printf("Making POST request to %s", targetURL)
 		}
-		response, err = s.PostWithRetry(*url, postData)
+		response, err = s.PostWithRetry(targetURL, postData)
 	default:
-		log.Fatal("Unsupported HTTP method:", *method)
+		return fmt.Errorf("unsupported HTTP method: %s", *method)
 	}
 
 	if err != nil {
-		log.Fatal("Request failed:", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 
 	// Output results
 	outputResponse(response, *output, *showHeaders, *verbose)
 
-	// Show proxy metrics if requested
-	if *showProxyMetrics && (*proxies != "" || *enableProxyHealth) {
-		metrics := s.GetProxyMetrics()
-		fmt.Printf("\n=== Proxy Metrics ===\n")
-		if metricsJSON, err := json.MarshalIndent(metrics, "", "  "); err == nil {
-			fmt.Println(string(metricsJSON))
-		}
-
-		// Show detailed proxy health if available
-		if *verbose {
-			health := s.GetAllProxiesHealth()
-			if len(health) > 0 {
-				fmt.Printf("\n=== Proxy Health Details ===\n")
-				if healthJSON, err := json.MarshalIndent(health, "", "  "); err == nil {
-					fmt.Println(string(healthJSON))
-				}
-			}
-		}
+	if *verbose {
+		log.Printf("Request completed successfully for %s", targetURL)
 	}
+
+	return nil
+}
+
+func parseCookiePersistence(persistence string) scraper.CookiePersistence {
+	switch persistence {
+	case "session":
+		return scraper.SessionPersistence
+	case "proxy":
+		return scraper.ProxyPersistence
+	case "none":
+		return scraper.NoPersistence
+	default:
+		log.Printf("Invalid cookie persistence mode: %s, using session", persistence)
+		return scraper.SessionPersistence
+	}
+}
+
+func getProfileName(fingerprint scraper.Fingerprint) string {
+	switch fingerprint {
+	case scraper.ChromeFingerprint:
+		return "chrome"
+	case scraper.FirefoxFingerprint:
+		return "firefox"
+	case scraper.SafariFingerprint:
+		return "safari"
+	case scraper.EdgeFingerprint:
+		return "edge"
+	default:
+		return "unknown"
+	}
+}
+
+func selectProxy(proxyList []string, reqIndex, urlIndex int) string {
+	if len(proxyList) == 0 {
+		return ""
+	}
+
+	// Use round-robin selection based on total request count
+	totalRequests := urlIndex*(*numRequests) + reqIndex
+	return proxyList[totalRequests%len(proxyList)]
 }
 
 func parseBrowserFingerprint(browser string) (scraper.Fingerprint, error) {

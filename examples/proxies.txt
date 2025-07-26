@@ -1,0 +1,13 @@
+# Example proxy list
+# HTTP proxies
+http://proxy1.example.com:8080
+http://proxy2.example.com:8080
+http://proxy3.example.com:3128
+
+# SOCKS5 proxies
+socks5://proxy4.example.com:1080
+socks5://proxy5.example.com:1080
+
+# Add your real proxies here (one per line)
+# http://user:pass@proxy.example.com:port
+# socks5://user:pass@proxy.example.com:port

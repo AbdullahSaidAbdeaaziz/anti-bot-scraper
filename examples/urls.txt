@@ -1,0 +1,9 @@
+# Example URL lists
+https://httpbin.org/headers
+https://httpbin.org/user-agent
+https://httpbin.org/ip
+https://httpbin.org/get
+https://httpbin.org/cookies
+https://httpbin.org/status/200
+https://httpbin.org/redirect/1
+https://httpbin.org/delay/1

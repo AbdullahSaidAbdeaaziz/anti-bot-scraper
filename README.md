@@ -4,6 +4,63 @@
 
 A sophisticated web scraping tool that uses cutting-edge TLS fingerprinting, human behavior simulation, and intelligent evasion techniques to bypass modern anti-bot systems. Built with Go for high performance and reliability.
 
+## 📚 Table of Contents
+
+### 🎯 **Getting Started**
+- [✨ Features Overview](#-features-overview)
+- [🚀 Quick Start](#-quick-start)
+  - [Installation](#installation)
+  - [Basic Usage Examples](#basic-usage-examples)
+
+### 🛠️ **Configuration & Usage**
+- [🚀 Enhanced Configuration Features](#-enhanced-configuration-features)
+  - [📝 Configurable Input Sources](#-configurable-input-sources)
+  - [🎭 Enhanced TLS Profile Management](#-enhanced-tls-profile-management)
+  - [🛡️ Advanced Header Mimicry](#️-advanced-header-mimicry)
+  - [🍪 Enhanced Cookie & Redirect Handling](#-enhanced-cookie--redirect-handling)
+  - [🔄 File-Based Proxy Management](#-file-based-proxy-management)
+  - [🎯 Comprehensive Evasion Example](#-comprehensive-evasion-example)
+
+### 🎮 **Feature Demonstrations**
+- [🎯 Core Feature Demonstrations](#-core-feature-demonstrations)
+  - [🛡️ TLS Fingerprinting & HTTP/2](#️-tls-fingerprinting--http2)
+  - [🧠 JavaScript Engine & Dynamic Content](#-javascript-engine--dynamic-content)
+  - [🎭 Human Behavior Simulation](#-human-behavior-simulation)
+  - [🔄 Intelligent Proxy Management](#-intelligent-proxy-management)
+  - [🧩 CAPTCHA Solving](#-captcha-solving)
+  - [⚡ High-Performance Concurrent Processing](#-high-performance-concurrent-processing)
+
+### 📖 **Reference & Documentation**
+- [📋 Complete Command Reference](#-complete-command-reference)
+- [🏗️ Architecture Overview](#️-architecture-overview)
+- [🎯 Feature Implementation Status](#-feature-implementation-status)
+- [📚 Enhanced Configuration Reference](#-enhanced-configuration-reference)
+  - [🎯 Core Input Configuration Flags](#-core-input-configuration-flags)
+  - [🛡️ TLS & Fingerprinting Flags](#️-tls--fingerprinting-flags)
+  - [⏱️ Timing & Delay Configuration](#️-timing--delay-configuration)
+  - [🎭 Enhanced Header Mimicry Flags](#-enhanced-header-mimicry-flags)
+  - [🍪 Cookie & Session Management Flags](#-cookie--session-management-flags)
+  - [🔄 Redirect Handling Flags](#-redirect-handling-flags)
+  - [📁 File Format Examples](#-file-format-examples)
+  - [🚀 Quick Start Examples](#-quick-start-examples)
+
+### 🚀 **Advanced Topics**
+- [🚀 Advanced Use Cases](#-advanced-use-cases)
+- [🔧 Advanced Configuration](#-advanced-configuration)
+- [📈 Performance Benchmarks](#-performance-benchmarks)
+
+### 🛠️ **Development & Support**
+- [🛠️ Development & Testing](#️-development--testing)
+- [🔍 Troubleshooting](#-troubleshooting)
+- [🛡️ Security & Ethics](#️-security--ethics)
+- [📚 Dependencies & Requirements](#-dependencies--requirements)
+
+### 📄 **Legal & Credits**
+- [📄 License](#-license)
+- [🙏 Acknowledgments](#-acknowledgments)
+
+---
+
 ## ✨ Features Overview
 
 ### 🔐 **Core Anti-Detection**
@@ -55,6 +112,103 @@ go build -o bin/scraper.exe ./cmd/scraper
 
 # High-performance concurrent scraping
 ./bin/scraper.exe -url https://httpbin.org/headers -enable-concurrent -max-concurrent 20 -show-performance-stats
+```
+
+## 🚀 Enhanced Configuration Features
+
+### 📝 **Configurable Input Sources**
+```bash
+# Single URL processing
+./scraper -url https://httpbin.org/headers -verbose
+
+# Multiple URLs from file
+./scraper -urls-file examples/urls.txt -num-requests 3 -verbose
+
+# Multiple requests per URL with delays
+./scraper -url https://httpbin.org/ip -num-requests 5 \
+  -delay-min 1s -delay-max 3s -delay-randomize
+```
+
+### 🎭 **Enhanced TLS Profile Management**
+```bash
+# Fixed TLS profile
+./scraper -url https://httpbin.org/headers -tls-profile chrome -verbose
+
+# Randomized TLS profiles across requests
+./scraper -urls-file examples/urls.txt -tls-randomize -num-requests 3 -verbose
+
+# TLS randomization with specific timing
+./scraper -url https://httpbin.org/headers -tls-randomize \
+  -num-requests 10 -delay-min 500ms -delay-max 2s
+```
+
+### 🛡️ **Advanced Header Mimicry**
+```bash
+# Automatic header profile matching TLS fingerprint
+./scraper -url https://httpbin.org/headers -header-mimicry \
+  -header-profile auto -enable-sec-headers -verbose
+
+# Custom header configuration
+./scraper -url https://httpbin.org/headers -header-mimicry \
+  -header-profile firefox -accept-language "en-US,en;q=0.5" \
+  -accept-encoding "gzip, deflate, br" -enable-sec-headers=false
+
+# Override User-Agent with custom value
+./scraper -url https://httpbin.org/user-agent \
+  -custom-user-agent "Mozilla/5.0 (Custom Browser)" -verbose
+```
+
+### 🍪 **Enhanced Cookie & Redirect Handling**
+```bash
+# Session-based cookie persistence
+./scraper -url https://httpbin.org/cookies/set/test/value \
+  -cookie-jar -cookie-persistence session -verbose
+
+# Proxy-based cookie isolation
+./scraper -url https://httpbin.org/cookies \
+  -cookie-jar -cookie-persistence proxy -proxy-file examples/proxies.txt
+
+# Advanced redirect handling
+./scraper -url https://httpbin.org/redirect/5 \
+  -follow-redirects -max-redirects 10 -redirect-timeout 30s -verbose
+
+# Cookie file persistence
+./scraper -url https://httpbin.org/cookies/set/persistent/data \
+  -cookie-file session.cookies -cookie-jar -verbose
+```
+
+### 🔄 **File-Based Proxy Management**
+```bash
+# Load proxies from file with round-robin rotation
+./scraper -urls-file examples/urls.txt -proxy-file examples/proxies.txt \
+  -num-requests 5 -verbose
+
+# Combined with enhanced evasion features
+./scraper -url https://httpbin.org/ip -proxy-file examples/proxies.txt \
+  -tls-randomize -header-mimicry -num-requests 3 \
+  -delay-min 1s -delay-max 3s -verbose
+```
+
+### 🎯 **Comprehensive Evasion Example**
+```bash
+# All enhanced features combined
+./scraper -urls-file examples/urls.txt \
+  -num-requests 2 \
+  -tls-randomize \
+  -header-mimicry \
+  -header-profile auto \
+  -enable-sec-headers \
+  -cookie-jar \
+  -cookie-persistence session \
+  -follow-redirects \
+  -max-redirects 5 \
+  -delay-min 800ms \
+  -delay-max 2500ms \
+  -delay-randomize \
+  -proxy-file examples/proxies.txt \
+  -accept-language "en-US,en;q=0.9" \
+  -output json \
+  -verbose
 ```
 
 ## 🎯 Core Feature Demonstrations
@@ -479,7 +633,111 @@ go version  # Should be 1.21 or higher
 go build -o bin/scraper.exe ./cmd/scraper
 ```
 
-## 📄 License
+## � Enhanced Configuration Reference
+
+### 🎯 **Core Input Configuration Flags**
+
+| Flag | Description | Default | Example |
+|------|-------------|---------|---------|
+| `-url` | Single URL to scrape | - | `https://example.com` |
+| `-urls-file` | File containing multiple URLs | - | `examples/urls.txt` |
+| `-num-requests` | Number of requests per URL | `1` | `5` |
+| `-proxy-file` | File containing proxy list | - | `examples/proxies.txt` |
+
+### 🛡️ **TLS & Fingerprinting Flags**
+
+| Flag | Description | Default | Options |
+|------|-------------|---------|---------|
+| `-tls-profile` | TLS profile for fingerprinting | `chrome` | `chrome`, `firefox`, `safari`, `edge` |
+| `-tls-randomize` | Randomize TLS profiles across requests | `false` | `true`, `false` |
+| `-browser` | Browser fingerprint (legacy) | `chrome` | `chrome`, `firefox`, `safari`, `edge` |
+
+### ⏱️ **Timing & Delay Configuration**
+
+| Flag | Description | Default | Example |
+|------|-------------|---------|---------|
+| `-delay-min` | Minimum delay between requests | `1s` | `500ms`, `2s` |
+| `-delay-max` | Maximum delay between requests | `3s` | `1s`, `5s` |
+| `-delay-randomize` | Randomize delays within range | `true` | `true`, `false` |
+| `-rate-limit` | Rate limit between requests | `1s` | `500ms`, `2s` |
+
+### 🎭 **Enhanced Header Mimicry Flags**
+
+| Flag | Description | Default | Options |
+|------|-------------|---------|---------|
+| `-header-mimicry` | Enable browser-consistent headers | `true` | `true`, `false` |
+| `-header-profile` | Header profile to use | `auto` | `auto`, `chrome`, `firefox`, `safari`, `edge` |
+| `-custom-user-agent` | Custom User-Agent override | - | Custom string |
+| `-enable-sec-headers` | Include security headers | `true` | `true`, `false` |
+| `-accept-language` | Accept-Language header value | `auto` | `en-US,en;q=0.9` |
+| `-accept-encoding` | Accept-Encoding header value | `auto` | `gzip, deflate, br` |
+
+### 🍪 **Cookie & Session Management Flags**
+
+| Flag | Description | Default | Options |
+|------|-------------|---------|---------|
+| `-cookie-jar` | Enable in-memory cookie jar | `true` | `true`, `false` |
+| `-cookie-persistence` | Cookie persistence mode | `session` | `session`, `proxy`, `none` |
+| `-cookie-file` | File to save/load cookies | - | `session.cookies` |
+| `-clear-cookies` | Clear cookies before each request | `false` | `true`, `false` |
+
+### 🔄 **Redirect Handling Flags**
+
+| Flag | Description | Default | Options |
+|------|-------------|---------|---------|
+| `-follow-redirects` | Follow HTTP redirects | `true` | `true`, `false` |
+| `-max-redirects` | Maximum redirects to follow | `10` | `5`, `20` |
+| `-redirect-timeout` | Timeout for redirect chains | `30s` | `10s`, `60s` |
+
+### 📁 **File Format Examples**
+
+#### URLs File (`urls.txt`)
+```text
+https://httpbin.org/headers
+https://httpbin.org/user-agent
+https://httpbin.org/ip
+# Comments start with #
+https://httpbin.org/get
+```
+
+#### Proxy File (`proxies.txt`)
+```text
+http://proxy1.example.com:8080
+http://user:pass@proxy2.example.com:3128
+socks5://proxy3.example.com:1080
+# HTTP and SOCKS5 proxies supported
+socks5://user:pass@proxy4.example.com:1080
+```
+
+### 🚀 **Quick Start Examples**
+
+#### Basic Enhanced Usage
+```bash
+# Single URL with enhanced features
+./scraper -url https://httpbin.org/headers -header-mimicry -verbose
+
+# Multiple URLs with randomization
+./scraper -urls-file examples/urls.txt -tls-randomize -num-requests 2
+```
+
+#### Advanced Configuration
+```bash
+# Comprehensive evasion setup
+./scraper -urls-file examples/urls.txt \
+  -num-requests 3 \
+  -tls-randomize \
+  -header-mimicry \
+  -header-profile auto \
+  -delay-min 1s \
+  -delay-max 3s \
+  -delay-randomize \
+  -cookie-jar \
+  -follow-redirects \
+  -proxy-file examples/proxies.txt \
+  -verbose
+```
+
+## �📄 License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
