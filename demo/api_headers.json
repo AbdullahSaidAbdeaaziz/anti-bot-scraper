@@ -1,8 +1,0 @@
-{
-  "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
-  "X-API-Key": "demo-api-key-12345",
-  "X-Client-Version": "1.0.0",
-  "X-Request-ID": "req-demo-001",
-  "Accept": "application/json",
-  "Content-Type": "application/json"
-}

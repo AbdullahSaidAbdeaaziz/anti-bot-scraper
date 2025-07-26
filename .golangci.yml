@@ -1,0 +1,108 @@
+# Go linting configuration for Anti-Bot Scraper
+
+linters-settings:
+  # Configure specific linters
+  goimports:
+    local-prefixes: anti-bot-scraper
+  
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment  # Too strict for this project
+  
+  gocyclo:
+    min-complexity: 15
+  
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  
+  funlen:
+    lines: 100
+    statements: 50
+  
+  lll:
+    line-length: 120
+  
+  maligned:
+    suggest-new: true
+  
+  dupl:
+    threshold: 100
+  
+  gocognit:
+    min-complexity: 15
+
+linters:
+  enable:
+    - bodyclose
+    - deadcode
+    - depguard
+    - dogsled
+    - dupl
+    - errcheck
+    - funlen
+    - gochecknoinits
+    - goconst
+    - gocyclo
+    - gofmt
+    - goimports
+    - golint
+    - gomnd
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - interfacer
+    - lll
+    - misspell
+    - nakedret
+    - rowserrcheck
+    - scopelint
+    - staticcheck
+    - structcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - varcheck
+    - whitespace
+  
+  disable:
+    - gochecknoglobals  # We use some global configurations
+    - gocognit          # Duplicate of gocyclo
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gosec
+        - dupl
+        - gomnd
+        - funlen
+    
+    # Exclude lll issues for long lines with URLs
+    - linters:
+        - lll
+      source: "https?://"
+    
+    # Exclude some gosec warnings that are acceptable
+    - linters:
+        - gosec
+      text: "G204:"  # Subprocess launched with variable
+    
+    # Exclude magic number warnings for common HTTP status codes
+    - linters:
+        - gomnd
+      text: "200|201|400|401|403|404|500|502|503"
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
