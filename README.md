@@ -242,23 +242,23 @@ go build -o bin/scraper.exe ./cmd/scraper
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Anti-Bot Scraper Architecture                │
 ├─────────────────────────────────────────────────────────────────┤
-│  CLI Interface (45+ Configuration Flags)                       │
+│  CLI Interface (45+ Configuration Flags)                        │
 ├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │ TLS Fingerprint │  │ JavaScript      │  │ Behavior        │ │
-│  │ • uTLS Library  │  │ • chromedp      │  │ • Human Actions │ │
-│  │ • HTTP/2        │  │ • 3 Exec Modes  │  │ • 4 Patterns    │ │
-│  │ • 4 Browsers    │  │ • Element Wait  │  │ • Timing Sim    │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
+│  │ TLS Fingerprint │  │ JavaScript      │  │ Behavior        │  │
+│  │ • uTLS Library  │  │ • chromedp      │  │ • Human Actions │  │
+│  │ • HTTP/2        │  │ • 3 Exec Modes  │  │ • 4 Patterns    │  │
+│  │ • 4 Browsers    │  │ • Element Wait  │  │ • Timing Sim    │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │ Proxy Management│  │ CAPTCHA Solver  │  │ Performance     │ │
-│  │ • Health Monitor │  │ • 4 Services    │  │ • Worker Pools  │ │
-│  │ • Smart Rotation│  │ • 7 Types       │  │ • Memory Opt    │ │
-│  │ • Failover      │  │ • Auto Detect   │  │ • Conn Pooling  │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
+│  │ Proxy Management│  │ CAPTCHA Solver  │  │ Performance     │  │
+│  │ • Health Monitor│  │ • 4 Services    │  │ • Worker Pools  │  │
+│  │ • Smart Rotation│  │ • 7 Types       │  │ • Memory Opt    │  │
+│  │ • Failover      │  │ • Auto Detect   │  │ • Conn Pooling  │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
-│  Core HTTP Engine (uTLS + HTTP/2 + Connection Pooling)         │
+│  Core HTTP Engine (uTLS + HTTP/2 + Connection Pooling)          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
