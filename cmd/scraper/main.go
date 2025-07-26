@@ -41,13 +41,23 @@ var (
 	captchaMaxRetries   = flag.Int("captcha-max-retries", 3, "Max retries for CAPTCHA solving")
 	captchaMinScore     = flag.Float64("captcha-min-score", 0.3, "Minimum score for reCAPTCHA v3 (0.1-0.9)")
 	showCaptchaInfo     = flag.Bool("show-captcha-info", false, "Show CAPTCHA detection and solving information")
-	httpVersion         = flag.String("http-version", "1.1", "HTTP version: '1.1', '2', or 'auto'")
-	userAgent           = flag.String("user-agent", "", "Custom User-Agent (overrides browser default)")
-	timeout             = flag.Duration("timeout", 30*time.Second, "Request timeout")
-	verbose             = flag.Bool("verbose", false, "Verbose output")
-	showHeaders         = flag.Bool("show-headers", false, "Show response headers")
-	followRedirect      = flag.Bool("follow-redirect", true, "Follow redirects")
-	version             = flag.Bool("version", false, "Show version information")
+	// Human Behavior Simulation Flags
+	enableBehavior       = flag.Bool("enable-behavior", false, "Enable human behavior simulation")
+	behaviorType         = flag.String("behavior-type", "normal", "Behavior type: 'normal', 'cautious', 'aggressive', 'random'")
+	behaviorMinDelay     = flag.Duration("behavior-min-delay", 500*time.Millisecond, "Minimum delay between actions")
+	behaviorMaxDelay     = flag.Duration("behavior-max-delay", 2*time.Second, "Maximum delay between actions")
+	enableMouseMove      = flag.Bool("enable-mouse-movement", true, "Enable realistic mouse movement simulation")
+	enableScrollSim      = flag.Bool("enable-scroll-simulation", true, "Enable realistic scrolling simulation")
+	enableTypingDelay    = flag.Bool("enable-typing-delay", true, "Enable realistic typing delays")
+	enableRandomActivity = flag.Bool("enable-random-activity", false, "Enable random page interactions")
+	showBehaviorInfo     = flag.Bool("show-behavior-info", false, "Show behavior simulation information")
+	httpVersion          = flag.String("http-version", "1.1", "HTTP version: '1.1', '2', or 'auto'")
+	userAgent            = flag.String("user-agent", "", "Custom User-Agent (overrides browser default)")
+	timeout              = flag.Duration("timeout", 30*time.Second, "Request timeout")
+	verbose              = flag.Bool("verbose", false, "Verbose output")
+	showHeaders          = flag.Bool("show-headers", false, "Show response headers")
+	followRedirect       = flag.Bool("follow-redirect", true, "Follow redirects")
+	version              = flag.Bool("version", false, "Show version information")
 	// JavaScript Engine Flags
 	enableJS       = flag.Bool("enable-js", false, "Enable JavaScript engine for dynamic content")
 	jsTimeout      = flag.Duration("js-timeout", 30*time.Second, "JavaScript execution timeout")
@@ -197,6 +207,50 @@ func main() {
 		}
 
 		options = append(options, scraper.WithCaptchaDetection(captchaConfig))
+	}
+
+	// Add Human Behavior Simulation configuration
+	if *enableBehavior {
+		var behaviorTypeEnum scraper.BehaviorType
+		switch *behaviorType {
+		case "normal":
+			behaviorTypeEnum = scraper.NormalBehavior
+		case "cautious":
+			behaviorTypeEnum = scraper.CautiousBehavior
+		case "aggressive":
+			behaviorTypeEnum = scraper.AggressiveBehavior
+		case "random":
+			behaviorTypeEnum = scraper.RandomBehavior
+		default:
+			log.Fatal("Invalid behavior type. Use 'normal', 'cautious', 'aggressive', or 'random'")
+		}
+
+		behaviorConfig := scraper.HumanBehaviorConfig{
+			Enabled:             true,
+			BehaviorType:        behaviorTypeEnum,
+			MinDelay:            *behaviorMinDelay,
+			MaxDelay:            *behaviorMaxDelay,
+			MouseMovement:       *enableMouseMove,
+			ScrollSimulation:    *enableScrollSim,
+			TypingDelay:         *enableTypingDelay,
+			PageLoadWait:        true,
+			RandomScrolling:     *enableRandomActivity,
+			RandomClicks:        *enableRandomActivity,
+			ViewportVariation:   true,
+			TabSwitchSimulation: false,
+		}
+
+		if *verbose || *showBehaviorInfo {
+			log.Printf("Human behavior simulation enabled with type: %s", *behaviorType)
+			log.Printf("Behavior delays: min=%v, max=%v", *behaviorMinDelay, *behaviorMaxDelay)
+			log.Printf("Mouse movement: %v, Scroll simulation: %v, Typing delay: %v",
+				*enableMouseMove, *enableScrollSim, *enableTypingDelay)
+			if *enableRandomActivity {
+				log.Printf("Random activity simulation enabled")
+			}
+		}
+
+		options = append(options, scraper.WithHumanBehavior(behaviorConfig))
 	}
 
 	// Parse HTTP version

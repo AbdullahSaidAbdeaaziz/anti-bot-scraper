@@ -39,14 +39,15 @@ type ProxyRotator struct {
 // AdvancedScraper extends the basic scraper with additional features
 type AdvancedScraper struct {
 	*Scraper
-	cookieJar       *CookieJar
-	proxyURL        string              // Single proxy (deprecated, use proxyRotator)
-	proxyRotator    *ProxyRotator       // Multi-proxy rotation
-	healthChecker   *ProxyHealthChecker // Proxy health monitoring
-	captchaSolver   *CaptchaSolver      // CAPTCHA solving service
-	captchaDetector *CaptchaDetector    // CAPTCHA detection and handling
-	retryCount      int
-	rateLimiter     *RateLimiter
+	cookieJar         *CookieJar              // Cookie management
+	proxyURL          string                  // Single proxy (deprecated, use proxyRotator)
+	proxyRotator      *ProxyRotator           // Multi-proxy rotation
+	healthChecker     *ProxyHealthChecker     // Proxy health monitoring
+	captchaSolver     *CaptchaSolver          // CAPTCHA solving service
+	captchaDetector   *CaptchaDetector        // CAPTCHA detection and handling
+	behaviorSimulator *HumanBehaviorSimulator // Human behavior simulation
+	retryCount        int
+	rateLimiter       *RateLimiter
 }
 
 // CookieJar manages cookies for the scraper
@@ -429,6 +430,34 @@ func WithRetryCount(count int) ScraperOption {
 func WithRateLimit(interval time.Duration) ScraperOption {
 	return func(s *AdvancedScraper) {
 		s.rateLimiter = NewRateLimiter(interval)
+	}
+}
+
+// WithHumanBehavior enables human behavior simulation
+func WithHumanBehavior(config HumanBehaviorConfig) ScraperOption {
+	return func(s *AdvancedScraper) {
+		s.behaviorSimulator = NewHumanBehaviorSimulator(config)
+	}
+}
+
+// WithBehaviorType sets a specific behavior type
+func WithBehaviorType(behaviorType BehaviorType) ScraperOption {
+	return func(s *AdvancedScraper) {
+		config := GetDefaultBehaviorConfig()
+		if s.behaviorSimulator != nil {
+			config = s.behaviorSimulator.config
+		}
+		config.BehaviorType = behaviorType
+		s.behaviorSimulator = NewHumanBehaviorSimulator(config)
+		s.behaviorSimulator.ApplyBehaviorType(behaviorType)
+	}
+}
+
+// EnableBehaviorSimulation enables default human behavior simulation
+func EnableBehaviorSimulation() ScraperOption {
+	return func(s *AdvancedScraper) {
+		config := GetDefaultBehaviorConfig()
+		s.behaviorSimulator = NewHumanBehaviorSimulator(config)
 	}
 }
 

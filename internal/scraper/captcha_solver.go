@@ -485,10 +485,10 @@ func (cs *CaptchaSolver) get2CaptchaBalance(ctx context.Context) (float64, error
 func (cs *CaptchaSolver) solveDeathByCaptchaImage(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
 	// DeathByCaptcha image submission
 	payload := map[string]interface{}{
-		"username":     cs.config.APIKey, // DeathByCaptcha uses username as API key
-		"password":     cs.config.APIKey, // Can use same key for both
-		"captchafile":  task.ImageData,
-		"type":         "0", // Image type
+		"username":    cs.config.APIKey, // DeathByCaptcha uses username as API key
+		"password":    cs.config.APIKey, // Can use same key for both
+		"captchafile": task.ImageData,
+		"type":        "0", // Image type
 	}
 
 	jsonData, err := json.Marshal(payload)
@@ -526,7 +526,7 @@ func (cs *CaptchaSolver) solveDeathByCaptchaImage(ctx context.Context, task *Cap
 	if captchaID, ok := result["captcha"].(float64); ok {
 		task.ID = fmt.Sprintf("%.0f", captchaID)
 		task.Status = "pending"
-		
+
 		// Poll for solution
 		return cs.pollDeathByCaptchaResult(ctx, task)
 	}
@@ -537,9 +537,9 @@ func (cs *CaptchaSolver) solveDeathByCaptchaImage(ctx context.Context, task *Cap
 func (cs *CaptchaSolver) solveDeathByCaptchaRecaptcha(ctx context.Context, task *CaptchaTask) (*CaptchaTask, error) {
 	// DeathByCaptcha reCAPTCHA submission
 	payload := map[string]interface{}{
-		"username":   cs.config.APIKey,
-		"password":   cs.config.APIKey,
-		"type":       "4", // reCAPTCHA type
+		"username": cs.config.APIKey,
+		"password": cs.config.APIKey,
+		"type":     "4", // reCAPTCHA type
 		"token_params": map[string]string{
 			"googlekey": task.SiteKey,
 			"pageurl":   task.PageURL,
@@ -581,7 +581,7 @@ func (cs *CaptchaSolver) solveDeathByCaptchaRecaptcha(ctx context.Context, task 
 	if captchaID, ok := result["captcha"].(float64); ok {
 		task.ID = fmt.Sprintf("%.0f", captchaID)
 		task.Status = "pending"
-		
+
 		// Poll for solution
 		return cs.pollDeathByCaptchaResult(ctx, task)
 	}
@@ -602,7 +602,7 @@ func (cs *CaptchaSolver) pollDeathByCaptchaResult(ctx context.Context, task *Cap
 			return nil, fmt.Errorf("DeathByCaptcha solving timed out after %v", cs.config.Timeout)
 		case <-ticker.C:
 			// Check result
-			req, err := http.NewRequestWithContext(ctx, "GET", 
+			req, err := http.NewRequestWithContext(ctx, "GET",
 				fmt.Sprintf("%s/api/captcha/%s", cs.apiURLs[DeathByCaptchaService], task.ID), nil)
 			if err != nil {
 				continue
@@ -752,7 +752,7 @@ func (cs *CaptchaSolver) solveAntiCaptchaImage(ctx context.Context, task *Captch
 	if taskID, ok := result["taskId"].(float64); ok {
 		task.ID = fmt.Sprintf("%.0f", taskID)
 		task.Status = "pending"
-		
+
 		// Poll for solution
 		return cs.pollAntiCaptchaResult(ctx, task)
 	}
@@ -821,7 +821,7 @@ func (cs *CaptchaSolver) solveAntiCaptchaRecaptcha(ctx context.Context, task *Ca
 	if taskID, ok := result["taskId"].(float64); ok {
 		task.ID = fmt.Sprintf("%.0f", taskID)
 		task.Status = "pending"
-		
+
 		return cs.pollAntiCaptchaResult(ctx, task)
 	}
 
@@ -887,7 +887,7 @@ func (cs *CaptchaSolver) solveAntiCaptchaRecaptchaV3(ctx context.Context, task *
 	if taskID, ok := result["taskId"].(float64); ok {
 		task.ID = fmt.Sprintf("%.0f", taskID)
 		task.Status = "pending"
-		
+
 		return cs.pollAntiCaptchaResult(ctx, task)
 	}
 
@@ -952,7 +952,7 @@ func (cs *CaptchaSolver) solveAntiCaptchaHCaptcha(ctx context.Context, task *Cap
 	if taskID, ok := result["taskId"].(float64); ok {
 		task.ID = fmt.Sprintf("%.0f", taskID)
 		task.Status = "pending"
-		
+
 		return cs.pollAntiCaptchaResult(ctx, task)
 	}
 
@@ -1232,7 +1232,7 @@ func (cs *CaptchaSolver) solveCapMonsterGeneric(ctx context.Context, task *Captc
 	if taskID, ok := result["taskId"].(float64); ok {
 		task.ID = fmt.Sprintf("%.0f", taskID)
 		task.Status = "pending"
-		
+
 		// Poll for solution using CapMonster API
 		return cs.pollCapMonsterResult(ctx, task)
 	}
